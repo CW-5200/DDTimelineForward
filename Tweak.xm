@@ -1,3 +1,5 @@
+[file name]: Tweak.xm
+[file content begin]
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
@@ -111,7 +113,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
-    descriptionLabel.text = @"启用后在朋友圈长按菜单中添加转发图标，可快速转发朋友圈内容";
+    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
     descriptionLabel.font = [UIFont systemFontOfSize:14];
     descriptionLabel.textColor = [UIColor secondaryLabelColor];
     descriptionLabel.numberOfLines = 0;
@@ -140,91 +142,154 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 @end
 
-// Hook实现
+// Hook实现 - 修复版
 %hook WCOperateFloatView
+
+// 使用关联对象避免重复添加按钮
+static void *forwardButtonKey = &forwardButtonKey;
 
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
     %orig(arg1, arg2);
     
     if ([DDTimelineForwardConfig isTimelineForwardEnabled]) {
-        // 创建转发按钮
-        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        
-        // 使用iOS系统转发图标（SF Symbols）
-        if (@available(iOS 13.0, *)) {
-            UIImage *forwardImage = [UIImage systemImageNamed:@"paperplane.fill"];
-            [forwardButton setImage:forwardImage forState:UIControlStateNormal];
-        } else {
-            // Fallback for older systems (虽然我们不支持，但保留)
-            [forwardButton setTitle:@"↗️" forState:UIControlStateNormal];
+        // 检查是否已存在转发按钮
+        UIButton *existingForwardButton = objc_getAssociatedObject(self, forwardButtonKey);
+        if (existingForwardButton) {
+            [existingForwardButton removeFromSuperview];
         }
         
-        // 设置按钮样式
-        forwardButton.tintColor = self.m_likeBtn.currentTitleColor;
+        // 创建转发按钮
+        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        
+        // 添加图标
+        if (@available(iOS 13.0, *)) {
+            // 使用系统图标
+            UIImage *forwardImage = [UIImage systemImageNamed:@"paperplane.fill"];
+            if (forwardImage) {
+                [forwardButton setImage:forwardImage forState:UIControlStateNormal];
+                
+                // 调整图标大小
+                CGSize imageSize = CGSizeMake(22, 22);
+                UIGraphicsBeginImageContextWithOptions(imageSize, NO, 0.0);
+                [forwardImage drawInRect:CGRectMake(0, 0, imageSize.width, imageSize.height)];
+                UIImage *resizedImage = UIGraphicsGetImageFromCurrentImageContext();
+                UIGraphicsEndImageContext();
+                
+                [forwardButton setImage:resizedImage forState:UIControlStateNormal];
+                
+                // 设置图标颜色与点赞按钮一致
+                UIColor *tintColor = self.m_likeBtn.currentTitleColor;
+                [forwardButton setTintColor:tintColor];
+                
+                // 调整图片位置
+                forwardButton.imageEdgeInsets = UIEdgeInsetsMake(0, -5, 0, 5);
+            } else {
+                // 如果系统图标不可用，使用文本
+                [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
+                [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
+            }
+        } else {
+            // iOS 13以下使用文本
+            [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
+            [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
+        }
+        
         forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
         [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
         
-        // 获取点赞按钮的尺寸作为参考
+        // 动态获取按钮宽度
+        CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
+        
+        // 获取点赞按钮的frame，确保获取的是正确的值
         CGRect likeBtnFrame = self.m_likeBtn.frame;
-        CGFloat buttonWidth = likeBtnFrame.size.width;
         
-        // 计算转发按钮的位置 - 调整居中位置
-        // 原点赞和评论按钮的父视图宽度
-        CGRect containerFrame = self.m_likeBtn.superview.frame;
-        CGFloat originalTotalWidth = containerFrame.size.width;
+        // 调试信息
+        NSLog(@"[DD] 点赞按钮frame: %@", NSStringFromCGRect(likeBtnFrame));
+        NSLog(@"[DD] 按钮宽度: %.2f", buttonWidth);
+        NSLog(@"[DD] 容器宽度: %.2f", CGRectGetWidth(self.frame));
         
-        // 新添加转发按钮，总宽度增加
-        CGFloat newTotalWidth = originalTotalWidth + buttonWidth;
-        
-        // 计算偏移量，使菜单整体居中
-        CGFloat offsetX = -buttonWidth / 2.0;
-        
-        // 调整原按钮容器的位置，使其居中
-        containerFrame.origin.x += offsetX;
-        containerFrame.size.width = newTotalWidth;
-        self.m_likeBtn.superview.frame = containerFrame;
-        
-        // 调整自己的frame
-        CGRect selfFrame = self.frame;
-        selfFrame.origin.x += offsetX;
-        selfFrame.size.width = newTotalWidth;
-        self.frame = selfFrame;
-        
-        // 设置转发按钮的位置（在评论按钮之后）
-        // 先获取评论按钮（假设它是点赞按钮的下一个兄弟视图）
-        UIView *commentButton = nil;
-        UIView *superview = self.m_likeBtn.superview;
-        NSArray *subviews = superview.subviews;
-        NSInteger likeIndex = [subviews indexOfObject:self.m_likeBtn];
-        if (likeIndex != NSNotFound && likeIndex + 1 < subviews.count) {
-            commentButton = subviews[likeIndex + 1];
-        }
-        
-        CGFloat forwardX;
-        if (commentButton) {
-            // 放在评论按钮之后
-            forwardX = CGRectGetMaxX(commentButton.frame);
-        } else {
-            // 如果找不到评论按钮，放在点赞按钮之后
-            forwardX = CGRectGetMaxX(likeBtnFrame);
-        }
-        
+        // 设置转发按钮frame - 修复偏移问题
+        // 使用相对布局，确保在点赞按钮右侧正确位置
         forwardButton.frame = CGRectMake(
-            forwardX,
+            CGRectGetMaxX(likeBtnFrame),  // 直接从点赞按钮右边开始
             likeBtnFrame.origin.y,
             buttonWidth,
             likeBtnFrame.size.height
         );
         
-        [superview addSubview:forwardButton];
+        // 添加到视图
+        [self addSubview:forwardButton];
+        
+        // 使用关联对象存储按钮引用
+        objc_setAssociatedObject(self, forwardButtonKey, forwardButton, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        
+        // 调整父容器宽度（可选，根据实际布局决定）
+        UIView *containerView = self.m_likeBtn.superview;
+        if (containerView) {
+            CGRect containerFrame = containerView.frame;
+            
+            // 计算新的宽度：原来的宽度 + 转发按钮的宽度 + 可能需要的间距
+            CGFloat originalWidth = CGRectGetWidth(containerFrame);
+            CGFloat newWidth = originalWidth + buttonWidth;
+            
+            containerFrame.size.width = newWidth;
+            containerView.frame = containerFrame;
+            
+            NSLog(@"[DD] 容器宽度从 %.2f 调整到 %.2f", originalWidth, newWidth);
+        }
+        
+        // 调整自身宽度
+        CGRect selfFrame = self.frame;
+        selfFrame.size.width += buttonWidth;
+        self.frame = selfFrame;
+        
+        // 重新布局以确保按钮正确显示
+        [self setNeedsLayout];
+        [self layoutIfNeeded];
     }
 }
 
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
-    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
-    if (self.navigationController) {
-        [self.navigationController pushViewController:forwardVC animated:YES];
+    if (!self.m_item || !self.navigationController) {
+        NSLog(@"[DD] 转发失败: 缺少必要数据");
+        return;
+    }
+    
+    Class WCForwardViewControllerClass = objc_getClass("WCForwardViewController");
+    if (!WCForwardViewControllerClass) {
+        NSLog(@"[DD] 转发失败: 未找到 WCForwardViewController 类");
+        return;
+    }
+    
+    // 使用安全的方式创建转发控制器
+    @try {
+        WCForwardViewController *forwardVC = [[WCForwardViewControllerClass alloc] initWithDataItem:self.m_item];
+        if (forwardVC && self.navigationController) {
+            [self.navigationController pushViewController:forwardVC animated:YES];
+            NSLog(@"[DD] 跳转到转发页面");
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[DD] 转发异常: %@", exception);
+    }
+}
+
+// 确保在视图更新时重新布局
+- (void)layoutSubviews {
+    %orig;
+    
+    // 更新转发按钮位置
+    UIButton *forwardButton = objc_getAssociatedObject(self, forwardButtonKey);
+    if (forwardButton && [DDTimelineForwardConfig isTimelineForwardEnabled]) {
+        CGRect likeBtnFrame = self.m_likeBtn.frame;
+        CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
+        
+        forwardButton.frame = CGRectMake(
+            CGRectGetMaxX(likeBtnFrame),
+            likeBtnFrame.origin.y,
+            buttonWidth,
+            likeBtnFrame.size.height
+        );
     }
 }
 
@@ -242,6 +307,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
                                controller:@"DDTimelineForwardSettingsController"];
         }
         
-        NSLog(@"DD朋友圈转发插件已加载");
+        NSLog(@"[DD] 朋友圈转发插件已加载");
     }
 }
+[file content end]

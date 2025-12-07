@@ -1,4 +1,5 @@
-
+[file name]: Tweak.xm
+[file content begin]
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
@@ -160,35 +161,32 @@ static void *forwardButtonKey = &forwardButtonKey;
         // 创建转发按钮
         UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
         
-        // 添加图标
-        if (@available(iOS 13.0, *)) {
-            // 使用系统图标
-            UIImage *forwardImage = [UIImage systemImageNamed:@"paperplane.fill"];
+        // 使用 UIButtonConfiguration (iOS 15+)
+        if (@available(iOS 15.0, *)) {
+            UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+            
+            // 添加图标
+            UIImageSymbolConfiguration *symbolConfig = [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightMedium];
+            UIImage *forwardImage = [UIImage systemImageNamed:@"paperplane.fill" withConfiguration:symbolConfig];
+            
             if (forwardImage) {
-                [forwardButton setImage:forwardImage forState:UIControlStateNormal];
-                
-                // 调整图标大小
-                CGSize imageSize = CGSizeMake(22, 22);
-                UIGraphicsBeginImageContextWithOptions(imageSize, NO, 0.0);
-                [forwardImage drawInRect:CGRectMake(0, 0, imageSize.width, imageSize.height)];
-                UIImage *resizedImage = UIGraphicsGetImageFromCurrentImageContext();
-                UIGraphicsEndImageContext();
-                
-                [forwardButton setImage:resizedImage forState:UIControlStateNormal];
+                config.image = forwardImage;
+                config.imagePlacement = NSDirectionalRectEdgeLeading;
+                config.imagePadding = 4;
                 
                 // 设置图标颜色与点赞按钮一致
                 UIColor *tintColor = self.m_likeBtn.currentTitleColor;
-                [forwardButton setTintColor:tintColor];
+                config.baseForegroundColor = tintColor;
                 
-                // 调整图片位置
-                forwardButton.imageEdgeInsets = UIEdgeInsetsMake(0, -5, 0, 5);
+                // 设置按钮配置
+                forwardButton.configuration = config;
             } else {
                 // 如果系统图标不可用，使用文本
                 [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
                 [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
             }
         } else {
-            // iOS 13以下使用文本
+            // iOS 15以下使用简单的文本按钮
             [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
             [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
         }
@@ -309,3 +307,4 @@ static void *forwardButtonKey = &forwardButtonKey;
         NSLog(@"[DD] 朋友圈转发插件已加载");
     }
 }
+[file content end]

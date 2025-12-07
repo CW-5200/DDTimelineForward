@@ -1,5 +1,4 @@
-[file name]: Tweak.xm
-[file content begin]
+
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
@@ -310,4 +309,3 @@ static void *forwardButtonKey = &forwardButtonKey;
         NSLog(@"[DD] 朋友圈转发插件已加载");
     }
 }
-[file content end]

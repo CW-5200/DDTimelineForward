@@ -1,9 +1,14 @@
-Package: com.dd. timelineforward
-Name: DD朋友圈
+Package: com.dd.timelineforward
+Name: DD朋友圈转发
 Version: 1.0.0
 Architecture: iphoneos-arm
-Description: DD朋友圈添加转发功能
+Description: 在微信朋友圈中添加转发功能
 Maintainer: DD
 Author: DD
 Section: Tweaks
-Depends: mobilesubstrate (>= 0.9.5000)
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)
+Conflicts: 
+Replaces: 
+Icon: 
+Depiction: 
+Homepage:

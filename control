@@ -6,9 +6,4 @@ Description: 在微信朋友圈中添加转发功能
 Maintainer: DD
 Author: DD
 Section: Tweaks
-Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)
-Conflicts: 
-Replaces: 
-Icon: 
-Depiction: 
-Homepage:
+Depends: mobilesubstrate (>= 0.9.5000)

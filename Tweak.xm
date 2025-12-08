@@ -1,14 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-// 微信原生类声明
-@interface WCDownloadMgr : NSObject
-+ (instancetype)sharedInstance;
-- (void)startDownloadMedia:(WCMediaItem *)mediaItem downloadType:(int)type;
-- (void)setDownloadProgressHandler:(void (^)(WCMediaItem *, float))handler;
-- (void)cancelDownloadMedia:(WCDataItem *)dataItem downloadType:(int)type;
-@end
-
+// 微信私有类声明
 @interface WCMediaItem : NSObject
 @property (nonatomic, readonly) NSString *mid;
 @property (nonatomic, readonly) int type;
@@ -118,10 +111,10 @@
 - (void)performForward:(WCMediaItem *)mediaItem {
     // 构造转发参数
     WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
-    forwardVC.mediaItem = mediaItem;
+    objc_setAssociatedObject(forwardVC, @selector(navigationController), self.navigationController, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     
     // 执行跳转
-    UINavigationController *nav = self.navigationController;
+    UINavigationController *nav = objc_getAssociatedObject(self, @selector(navigationController));
     if (nav) {
         [nav pushViewController:forwardVC animated:YES];
     }

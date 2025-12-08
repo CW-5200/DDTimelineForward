@@ -60,6 +60,7 @@
 // 媒体下载器接口
 @interface WCMediaDownloader : NSObject
 @property (copy, nonatomic) void (^completionHandler)(BOOL success);
+@property (readonly, nonatomic) WCMediaItem *mediaItem;
 - (instancetype)initWithDataItem:(WCDataItem *)dataItem mediaItem:(WCMediaItem *)mediaItem;
 - (void)startDownloadWithCompletionHandler:(void (^)(BOOL success))handler;
 - (BOOL)hasDownloaded;
@@ -77,6 +78,7 @@
 - (BOOL)isMediaCached:(WCMediaItem *)mediaItem;
 - (NSString *)getCachePathForMediaItem:(WCMediaItem *)mediaItem;
 - (void)clearCache;
+- (void)handleMediaDownloadComplete:(WCMediaItem *)mediaItem success:(BOOL)success;
 @end
 
 // 下载进度视图
@@ -783,42 +785,38 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
 
 @end
 
+// 辅助函数：获取主窗口
+static UIWindow *DDGetKeyWindow(void) {
+    UIWindow *keyWindow = nil;
+    
+    if (@available(iOS 13.0, *)) {
+        for (UIWindowScene *windowScene in [UIApplication sharedApplication].connectedScenes) {
+            if (windowScene.activationState == UISceneActivationStateForegroundActive) {
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+                if (keyWindow) break;
+            }
+        }
+    } else {
+        keyWindow = [UIApplication sharedApplication].keyWindow;
+    }
+    
+    // 如果仍然没有找到，使用第一个窗口
+    if (!keyWindow && [UIApplication sharedApplication].windows.count > 0) {
+        keyWindow = [UIApplication sharedApplication].windows.firstObject;
+    }
+    
+    return keyWindow;
+}
+
 // Hook实现
 %hook WCOperateFloatView
 
-- (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
-    %orig(arg1, arg2);
-    
-    if ([DDTimelineForwardConfig isTimelineForwardEnabled]) {
-        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
-        [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
-        forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
-        [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
-        
-        CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
-        CGRect likeBtnFrame = self.m_likeBtn.frame;
-        
-        forwardButton.frame = CGRectMake(
-            CGRectGetMaxX(likeBtnFrame) + buttonWidth,
-            likeBtnFrame.origin.y,
-            buttonWidth,
-            likeBtnFrame.size.height
-        );
-        
-        [self addSubview:forwardButton];
-        
-        // 调整容器宽度
-        CGRect containerFrame = self.m_likeBtn.superview.frame;
-        containerFrame.size.width += buttonWidth;
-        self.m_likeBtn.superview.frame = containerFrame;
-        
-        CGRect selfFrame = self.frame;
-        selfFrame.size.width += buttonWidth;
-        self.frame = selfFrame;
-    }
-}
-
+// 新增方法：转发朋友圈
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
     if (!self.m_item) {
@@ -835,15 +833,15 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     }
 }
 
+// 新增方法：准备媒体并转发
 %new
 - (void)dd_prepareMediaAndForward {
     // 显示下载进度
     DDDownloadProgressView *progressView = nil;
     if ([DDTimelineForwardConfig showDownloadProgress]) {
-        UIView *superview = self.navigationController.view ?: [UIApplication sharedApplication].keyWindow;
+        UIView *superview = self.navigationController.view ?: DDGetKeyWindow();
         progressView = [[DDDownloadProgressView alloc] initWithFrame:CGRectZero];
         
-        __weak typeof(self) weakSelf = self;
         __weak typeof(progressView) weakProgressView = progressView;
         
         progressView.cancelHandler = ^{
@@ -885,6 +883,7 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     }
 }
 
+// 新增方法：直接转发到朋友圈
 %new
 - (void)dd_forwardToTimeline {
     WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
@@ -899,6 +898,7 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     }
 }
 
+// 新增方法：显示下载失败提示
 %new
 - (void)dd_showDownloadFailedAlert:(NSArray *)failedMedia {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"媒体下载失败"
@@ -914,9 +914,10 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     [presentingVC presentViewController:alert animated:YES completion:nil];
 }
 
+// 新增方法：获取顶层视图控制器
 %new
 - (UIViewController *)dd_topViewController {
-    UIWindow *window = [UIApplication sharedApplication].keyWindow;
+    UIWindow *window = DDGetKeyWindow();
     UIViewController *rootVC = window.rootViewController;
     
     while (rootVC.presentedViewController) {
@@ -932,6 +933,39 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     }
     
     return rootVC;
+}
+
+- (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
+    %orig(arg1, arg2);
+    
+    if ([DDTimelineForwardConfig isTimelineForwardEnabled]) {
+        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
+        [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
+        forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
+        [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
+        
+        CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
+        CGRect likeBtnFrame = self.m_likeBtn.frame;
+        
+        forwardButton.frame = CGRectMake(
+            CGRectGetMaxX(likeBtnFrame) + buttonWidth,
+            likeBtnFrame.origin.y,
+            buttonWidth,
+            likeBtnFrame.size.height
+        );
+        
+        [self addSubview:forwardButton];
+        
+        // 调整容器宽度
+        CGRect containerFrame = self.m_likeBtn.superview.frame;
+        containerFrame.size.width += buttonWidth;
+        self.m_likeBtn.superview.frame = containerFrame;
+        
+        CGRect selfFrame = self.frame;
+        selfFrame.size.width += buttonWidth;
+        self.frame = selfFrame;
+    }
 }
 
 %end
@@ -975,8 +1009,9 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     // 创建新的完成处理器
     void (^newHandler)(BOOL) = ^(BOOL success) {
         // 通知缓存管理器
-        if (self.mediaItem) {
-            [[DDMediaCacheManager sharedManager] handleMediaDownloadComplete:self.mediaItem success:success];
+        WCMediaItem *mediaItem = [self mediaItem];
+        if (mediaItem) {
+            [[DDMediaCacheManager sharedManager] handleMediaDownloadComplete:mediaItem success:success];
         }
         
         // 调用原始处理器

@@ -154,14 +154,14 @@ static NSString *const kEnableKey = @"timeline_forward_enabled";
     // 注册设置界面
     if (NSClassFromString(@"WCPluginsMgr")) {
         [[WCPluginsMgr sharedInstance] registerControllerWithTitle:@"朋友圈转发"
-                                                         version:@"1.0"
+                                                         version:@"1.0.1"
                                                      controller:@"DDTimelineForwardSettingsController"];
     }
     
     // 初始化配置
     [DDTimelineForwardConfig setupDefaults];
     
-    NSLog(@"[TimelineForward] Plugin initialized");
+    NSLog(@"[TimelineForward] Plugin initialized (v1.0.1)");
 }
 
 // 设置界面（示例）

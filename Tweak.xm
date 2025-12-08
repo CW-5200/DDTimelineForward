@@ -145,7 +145,9 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
     _loadingView.center = CGPointMake(view.bounds.size.width/2, view.bounds.size.height/2);
     _loadingView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
     
-    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+    // 使用新的ActivityIndicatorView样式
+    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    indicator.color = [UIColor whiteColor];
     indicator.center = CGPointMake(60, 50);
     [indicator startAnimating];
     [_loadingView addSubview:indicator];
@@ -216,8 +218,6 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
 
 - (NSString *)md5Hash:(NSString *)string {
     // 简单的哈希函数，用于生成文件名
-    const char *cStr = [string UTF8String];
-    unsigned char result[16];
     __block NSString *hash = @"";
     
     // 简化版本，实际应该使用更安全的哈希
@@ -381,11 +381,13 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     // 配置iOS 15+模态样式
-    UISheetPresentationController *sheet = self.sheetPresentationController;
-    if (sheet) {
-        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
-        sheet.prefersGrabberVisible = YES;
-        sheet.preferredCornerRadius = 20.0;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheet = self.sheetPresentationController;
+        if (sheet) {
+            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+            sheet.prefersGrabberVisible = YES;
+            sheet.preferredCornerRadius = 20.0;
+        }
     }
     
     [self setupUI];

@@ -10,15 +10,32 @@
 // 微信相关类声明
 @interface WCDataItem : NSObject
 @property(retain, nonatomic) NSString *username;
-@property(retain, nonatomic) NSArray *mediaList;
+@property(retain, nonatomic) id mediaList; // MediaList类型
+@end
+
+@interface MediaList : NSObject
+@property(retain, nonatomic) NSMutableArray *media; // WCMediaItem数组
 @end
 
 @interface WCMediaItem : NSObject
-@property (retain, nonatomic) NSString *mid;
-@property (nonatomic) int type; // 媒体类型
-@property (retain, nonatomic) NSString *dataUrl; // 实际是WCUrl对象，这里简化
-- (BOOL)hasData; // 检查是否已下载
-- (BOOL)hasSight; // 检查视频是否已下载
+@property(retain, nonatomic) NSString *tid;
+@property(retain, nonatomic) NSString *mid;
+@property(nonatomic) int type;
+@property(retain, nonatomic) NSString *title;
+@property(retain, nonatomic) NSString *desc;
+@property(retain, nonatomic) NSMutableArray *previewUrls;
+@property(retain, nonatomic) id dataUrl;
+@property(retain, nonatomic) id lowBandUrl;
+// ... 其他属性
+@end
+
+@interface WCMediaDownloader : NSObject
+@property(readonly, nonatomic) WCDataItem *dataItem;
+@property(readonly, nonatomic) WCMediaItem *mediaItem;
+@property(copy, nonatomic) void (^completionHandler)(NSError *error);
++ (instancetype)downloaderWithDataItem:(WCDataItem *)dataItem mediaItem:(WCMediaItem *)mediaItem;
+- (void)startDownloadWithCompletionHandler:(void (^)(NSError *error))handler;
+- (BOOL)hasDownloaded;
 @end
 
 @interface WCOperateFloatView : UIView
@@ -33,11 +50,9 @@
 - (id)initWithDataItem:(WCDataItem *)arg1;
 @end
 
-// 媒体下载管理器
-@interface WCMediaDownloader : NSObject
-@property (copy, nonatomic) id /* block */ completionHandler;
-- (id)initWithDataItem:(WCDataItem *)arg0 mediaItem:(WCMediaItem *)arg1;
-- (void)startDownloadWithCompletionHandler:(id /* block */)arg0;
+@interface UIViewController (DDTimeline)
+- (void)showLoadingView;
+- (void)hideLoadingView;
 @end
 
 // 插件配置类
@@ -74,108 +89,173 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults objectForKey:kTimelineForwardEnabledKey]) {
         [defaults setBool:YES forKey:kTimelineForwardEnabledKey];
-        [defaults setBool:YES forKey:kAutoDownloadEnabledKey];
-        [defaults synchronize];
     }
+    if (![defaults objectForKey:kAutoDownloadEnabledKey]) {
+        [defaults setBool:YES forKey:kAutoDownloadEnabledKey];
+    }
+    [defaults synchronize];
 }
 
 @end
 
-// 媒体下载器管理器
+// 下载管理器
 @interface DDMediaDownloadManager : NSObject
 + (instancetype)sharedManager;
-- (void)downloadMediaForDataItem:(WCDataItem *)dataItem completion:(void(^)(BOOL success, NSError *error))completion;
+- (void)downloadMediaForDataItem:(WCDataItem *)dataItem
+              inViewController:(UIViewController *)viewController
+                    completion:(void (^)(BOOL success, NSError *error))completion;
 @end
 
-@implementation DDMediaDownloadManager
+@implementation DDMediaDownloadManager {
+    NSMutableDictionary *_downloaders;
+    dispatch_group_t _downloadGroup;
+    NSInteger _successCount;
+    NSInteger _failCount;
+}
 
 + (instancetype)sharedManager {
-    static DDMediaDownloadManager *sharedInstance = nil;
+    static DDMediaDownloadManager *instance;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
+        instance = [[DDMediaDownloadManager alloc] init];
     });
-    return sharedInstance;
+    return instance;
 }
 
-// 检查媒体是否已下载
-- (BOOL)checkMediaDownloadStatus:(WCDataItem *)dataItem {
-    if (!dataItem.mediaList || dataItem.mediaList.count == 0) {
-        return YES; // 没有媒体，不需要下载
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _downloaders = [NSMutableDictionary dictionary];
+        _downloadGroup = dispatch_group_create();
     }
+    return self;
+}
+
+- (void)downloadMediaForDataItem:(WCDataItem *)dataItem
+              inViewController:(UIViewController *)viewController
+                    completion:(void (^)(BOOL success, NSError *error))completion {
     
-    for (WCMediaItem *mediaItem in dataItem.mediaList) {
-        // 根据媒体类型检查是否已下载
-        if (mediaItem.type == 2) { // 视频类型
-            if (![mediaItem hasSight]) {
-                return NO;
-            }
-        } else { // 图片类型
-            if (![mediaItem hasData]) {
-                return NO;
-            }
+    if (![DDTimelineForwardConfig isAutoDownloadEnabled]) {
+        if (completion) {
+            completion(YES, nil);
         }
-    }
-    return YES;
-}
-
-// 下载媒体
-- (void)downloadMediaForDataItem:(WCDataItem *)dataItem completion:(void(^)(BOOL success, NSError *error))completion {
-    if (!dataItem.mediaList || dataItem.mediaList.count == 0) {
-        if (completion) completion(YES, nil);
         return;
     }
     
-    __block NSInteger downloadCount = 0;
-    __block NSInteger totalCount = dataItem.mediaList.count;
-    __block BOOL hasError = NO;
-    __block NSError *lastError = nil;
-    
-    for (WCMediaItem *mediaItem in dataItem.mediaList) {
-        @autoreleasepool {
-            // 检查是否已下载
-            BOOL isDownloaded = NO;
-            if (mediaItem.type == 2) {
-                isDownloaded = [mediaItem hasSight];
-            } else {
-                isDownloaded = [mediaItem hasData];
-            }
-            
-            if (isDownloaded) {
-                downloadCount++;
-                if (downloadCount == totalCount) {
-                    if (completion) completion(!hasError, lastError);
-                }
-                continue;
-            }
-            
-            // 创建下载器
-            WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] initWithDataItem:dataItem mediaItem:mediaItem];
-            if (downloader) {
-                [downloader startDownloadWithCompletionHandler:^(NSError *error) {
-                    downloadCount++;
-                    
-                    if (error) {
-                        hasError = YES;
-                        lastError = error;
-                        NSLog(@"[DDTimelineForward] 媒体下载失败: %@", error);
-                    }
-                    
-                    // 所有媒体下载完成
-                    if (downloadCount == totalCount) {
-                        if (completion) {
-                            completion(!hasError, lastError);
-                        }
-                    }
-                }];
-            } else {
-                downloadCount++;
-                if (downloadCount == totalCount) {
-                    if (completion) completion(!hasError, lastError);
-                }
-            }
-        }
+    // 获取媒体列表
+    MediaList *mediaList = nil;
+    @try {
+        mediaList = [dataItem valueForKey:@"mediaList"];
+    } @catch (NSException *exception) {
+        NSLog(@"DDTimeline: 无法获取mediaList: %@", exception);
     }
+    
+    NSArray *mediaItems = mediaList.media;
+    if (!mediaItems || mediaItems.count == 0) {
+        NSLog(@"DDTimeline: 没有媒体需要下载");
+        if (completion) {
+            completion(YES, nil);
+        }
+        return;
+    }
+    
+    NSLog(@"DDTimeline: 开始下载 %lu 个媒体文件", (unsigned long)mediaItems.count);
+    
+    [viewController showLoadingView];
+    
+    // 重置计数器
+    _successCount = 0;
+    _failCount = 0;
+    
+    // 下载每个媒体文件
+    for (WCMediaItem *mediaItem in mediaItems) {
+        if ([self mediaItemAlreadyDownloaded:mediaItem]) {
+            NSLog(@"DDTimeline: 媒体已下载: %@", mediaItem.mid);
+            _successCount++;
+            continue;
+        }
+        
+        dispatch_group_enter(_downloadGroup);
+        
+        // 创建下载器
+        WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] init];
+        [downloader setValue:dataItem forKey:@"dataItem"];
+        [downloader setValue:mediaItem forKey:@"mediaItem"];
+        
+        NSString *key = [NSString stringWithFormat:@"%@_%@", dataItem.username, mediaItem.mid];
+        _downloaders[key] = downloader;
+        
+        [downloader startDownloadWithCompletionHandler:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (error) {
+                    NSLog(@"DDTimeline: 下载失败: %@, error: %@", mediaItem.mid, error);
+                    self->_failCount++;
+                } else {
+                    NSLog(@"DDTimeline: 下载成功: %@", mediaItem.mid);
+                    self->_successCount++;
+                }
+                
+                [self->_downloaders removeObjectForKey:key];
+                dispatch_group_leave(self->_downloadGroup);
+            });
+        }];
+    }
+    
+    // 所有下载完成后回调
+    dispatch_group_notify(_downloadGroup, dispatch_get_main_queue(), ^{
+        [viewController hideLoadingView];
+        
+        BOOL success = _failCount == 0;
+        NSError *error = nil;
+        
+        if (_failCount > 0) {
+            NSString *errorMsg = [NSString stringWithFormat:@"成功下载 %ld 个，失败 %ld 个", (long)_successCount, (long)_failCount];
+            error = [NSError errorWithDomain:@"DDTimelineForward" 
+                                        code:-1 
+                                    userInfo:@{NSLocalizedDescriptionKey: errorMsg}];
+            NSLog(@"DDTimeline: %@", errorMsg);
+        } else {
+            NSLog(@"DDTimeline: 所有媒体下载完成");
+        }
+        
+        if (completion) {
+            completion(success, error);
+        }
+    });
+}
+
+- (BOOL)mediaItemAlreadyDownloaded:(WCMediaItem *)mediaItem {
+    @try {
+        // 尝试调用hasDownloaded方法
+        if ([mediaItem respondsToSelector:@selector(hasDownloaded)]) {
+            BOOL downloaded = [mediaItem hasDownloaded];
+            return downloaded;
+        }
+        
+        // 或者检查本地文件是否存在
+        NSString *mediaID = mediaItem.mid;
+        if (!mediaID) return NO;
+        
+        // 构建可能的文件路径
+        NSString *documentsPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *snsPath = [documentsPath stringByAppendingPathComponent:@"Sns"];
+        NSString *mediaPath = [snsPath stringByAppendingPathComponent:mediaID];
+        
+        if ([[NSFileManager defaultManager] fileExistsAtPath:mediaPath]) {
+            return YES;
+        }
+        
+        // 检查是否有预览图
+        if (mediaItem.previewUrls && mediaItem.previewUrls.count > 0) {
+            // 这里可以添加更复杂的检查逻辑
+            return NO;
+        }
+        
+    } @catch (NSException *exception) {
+        NSLog(@"DDTimeline: 检查下载状态异常: %@", exception);
+    }
+    
+    return NO;
 }
 
 @end
@@ -206,18 +286,14 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
 }
 
 - (void)setupUI {
-    UIScrollView *scrollView = [[UIScrollView alloc] init];
-    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:scrollView];
-    
     UIStackView *mainStack = [[UIStackView alloc] init];
     mainStack.axis = UILayoutConstraintAxisVertical;
     mainStack.spacing = 24;
     mainStack.alignment = UIStackViewAlignmentFill;
     mainStack.translatesAutoresizingMaskIntoConstraints = NO;
-    [scrollView addSubview:mainStack];
+    [self.view addSubview:mainStack];
     
-    // 开关控件 - 启用转发
+    // 开关控件1: 启用转发
     UIView *switchContainer1 = [[UIView alloc] init];
     
     UILabel *titleLabel1 = [[UILabel alloc] init];
@@ -241,7 +317,7 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
     
     [mainStack addArrangedSubview:switchContainer1];
     
-    // 开关控件 - 自动下载媒体
+    // 开关控件2: 自动下载媒体
     UIView *switchContainer2 = [[UIView alloc] init];
     
     UILabel *titleLabel2 = [[UILabel alloc] init];
@@ -263,16 +339,11 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
         [self.autoDownloadSwitch.centerYAnchor constraintEqualToAnchor:switchContainer2.centerYAnchor]
     ]];
     
-    UILabel *downloadDescLabel = [[UILabel alloc] init];
-    downloadDescLabel.text = @"转发前自动下载图片/视频，确保转发成功";
-    downloadDescLabel.font = [UIFont systemFontOfSize:12];
-    downloadDescLabel.textColor = [UIColor secondaryLabelColor];
-    downloadDescLabel.numberOfLines = 0;
-    [mainStack addArrangedSubview:downloadDescLabel];
+    [mainStack addArrangedSubview:switchContainer2];
     
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
-    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
+    descriptionLabel.text = @"自动下载功能会在转发前下载所有媒体文件，避免转发失败";
     descriptionLabel.font = [UIFont systemFontOfSize:14];
     descriptionLabel.textColor = [UIColor secondaryLabelColor];
     descriptionLabel.numberOfLines = 0;
@@ -289,16 +360,9 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
     
     // 布局约束
     [NSLayoutConstraint activateConstraints:@[
-        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        
-        [mainStack.topAnchor constraintEqualToAnchor:scrollView.topAnchor constant:20],
-        [mainStack.leadingAnchor constraintEqualToAnchor:scrollView.leadingAnchor constant:20],
-        [mainStack.trailingAnchor constraintEqualToAnchor:scrollView.trailingAnchor constant:-20],
-        [mainStack.bottomAnchor constraintEqualToAnchor:scrollView.bottomAnchor constant:-20],
-        [mainStack.widthAnchor constraintEqualToAnchor:scrollView.widthAnchor constant:-40]
+        [mainStack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
+        [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20]
     ]];
 }
 
@@ -350,83 +414,59 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
 
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
-    if (!self.m_item) {
+    // 禁用按钮，防止重复点击
+    sender.enabled = NO;
+    
+    // 获取当前视图控制器
+    UIViewController *currentVC = nil;
+    if (self.navigationController) {
+        currentVC = self.navigationController;
+    } else {
+        // 查找父视图控制器
+        UIResponder *responder = self;
+        while (![responder isKindOfClass:[UIViewController class]]) {
+            responder = responder.nextResponder;
+        }
+        currentVC = (UIViewController *)responder;
+    }
+    
+    if (!currentVC) {
+        NSLog(@"DDTimeline: 无法找到当前视图控制器");
+        sender.enabled = YES;
         return;
     }
     
-    // 检查是否需要自动下载媒体
-    if ([DDTimelineForwardConfig isAutoDownloadEnabled]) {
-        // 检查媒体下载状态
-        BOOL mediaDownloaded = [[DDMediaDownloadManager sharedManager] checkMediaDownloadStatus:self.m_item];
-        
-        if (!mediaDownloaded) {
-            // 显示下载提示
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"下载媒体" 
-                                                                           message:@"正在下载媒体文件，请稍候..." 
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
+    // 下载媒体文件
+    [[DDMediaDownloadManager sharedManager] downloadMediaForDataItem:self.m_item
+                                                  inViewController:currentVC
+                                                        completion:^(BOOL success, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sender.enabled = YES;
             
-            // 开始下载媒体
-            [[DDMediaDownloadManager sharedManager] downloadMediaForDataItem:self.m_item completion:^(BOOL success, NSError *error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [alert dismissViewControllerAnimated:YES completion:^{
-                        if (success) {
-                            // 下载成功，跳转到转发界面
-                            [self showForwardViewController];
-                        } else {
-                            // 下载失败，询问用户是否继续
-                            UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"下载失败" 
-                                                                                               message:@"媒体下载失败，可能无法转发图片/视频，是否继续？" 
-                                                                                        preferredStyle:UIAlertControllerStyleAlert];
-                            [errorAlert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                            [errorAlert addAction:[UIAlertAction actionWithTitle:@"继续转发" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                                [self showForwardViewController];
-                            }]];
-                            [self.window.rootViewController presentViewController:errorAlert animated:YES completion:nil];
-                        }
-                    }];
-                });
-            }];
-        } else {
-            // 媒体已下载，直接跳转
-            [self showForwardViewController];
-        }
-    } else {
-        // 不自动下载，直接跳转
-        [self showForwardViewController];
-    }
-}
-
-%new
-- (void)showForwardViewController {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
-        if (self.navigationController) {
-            [self.navigationController pushViewController:forwardVC animated:YES];
-        } else {
-            // 如果没有导航控制器，尝试模态展示
-            UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-            UINavigationController *nav = [[objc_getClass("UINavigationController") alloc] initWithRootViewController:forwardVC];
-            [rootVC presentViewController:nav animated:YES completion:nil];
-        }
-    });
-}
-
-%end
-
-// 添加对WCDataItem的hook以确保可以获取mediaList
-%hook WCDataItem
-
-%new
-- (NSArray *)mediaList {
-    // 使用KVC获取媒体列表
-    id mediaObj = [self valueForKey:@"media"];
-    if (mediaObj) {
-        if ([mediaObj isKindOfClass:[NSArray class]]) {
-            return mediaObj;
-        }
-    }
-    return @[];
+            if (success || error) {
+                // 即使有部分失败也跳转，让转发界面处理
+                WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
+                if (self.navigationController) {
+                    [self.navigationController pushViewController:forwardVC animated:YES];
+                } else if (currentVC.navigationController) {
+                    [currentVC.navigationController pushViewController:forwardVC animated:YES];
+                } else {
+                    [currentVC presentViewController:forwardVC animated:YES completion:nil];
+                }
+            }
+            
+            // 如果下载失败，显示提示（可选）
+            if (error) {
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"提示"
+                                                                               message:error.localizedDescription
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"确定" 
+                                                         style:UIAlertActionStyleDefault 
+                                                       handler:nil]];
+                [currentVC presentViewController:alert animated:YES completion:nil];
+            }
+        });
+    }];
 }
 
 %end
@@ -443,6 +483,6 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
                                controller:@"DDTimelineForwardSettingsController"];
         }
         
-        NSLog(@"[DDTimelineForward] 插件已加载 v1.1.0");
+        NSLog(@"DD朋友圈转发插件 v1.1.0 已加载");
     }
 }

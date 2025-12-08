@@ -27,15 +27,20 @@
 @property(retain, nonatomic) id dataUrl;
 @property(retain, nonatomic) id lowBandUrl;
 // ... 其他属性
+- (BOOL)hasData; // 根据头文件，有这个方法
+- (BOOL)hasSight;
+- (BOOL)hasAttachVideo;
 @end
 
 @interface WCMediaDownloader : NSObject
 @property(readonly, nonatomic) WCDataItem *dataItem;
 @property(readonly, nonatomic) WCMediaItem *mediaItem;
 @property(copy, nonatomic) void (^completionHandler)(NSError *error);
-+ (instancetype)downloaderWithDataItem:(WCDataItem *)dataItem mediaItem:(WCMediaItem *)mediaItem;
+- (id)initWithDataItem:(WCDataItem *)dataItem mediaItem:(WCMediaItem *)mediaItem;
 - (void)startDownloadWithCompletionHandler:(void (^)(NSError *error))handler;
-- (BOOL)hasDownloaded;
+- (BOOL)hasDownloaded; // 这个方法在WCMediaDownloader中
+- (BOOL)Image_hasDownloaded;
+- (BOOL)Video_hasDownloaded;
 @end
 
 @interface WCOperateFloatView : UIView
@@ -48,11 +53,6 @@
 
 @interface WCForwardViewController : UIViewController
 - (id)initWithDataItem:(WCDataItem *)arg1;
-@end
-
-@interface UIViewController (DDTimeline)
-- (void)showLoadingView;
-- (void)hideLoadingView;
 @end
 
 // 插件配置类
@@ -107,10 +107,13 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
 @end
 
 @implementation DDMediaDownloadManager {
+    NSMutableArray *_downloadingItems;
     NSMutableDictionary *_downloaders;
-    dispatch_group_t _downloadGroup;
     NSInteger _successCount;
     NSInteger _failCount;
+    NSInteger _totalCount;
+    void (^_completion)(BOOL success, NSError *error);
+    UIView *_loadingView;
 }
 
 + (instancetype)sharedManager {
@@ -125,10 +128,107 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _downloadingItems = [NSMutableArray array];
         _downloaders = [NSMutableDictionary dictionary];
-        _downloadGroup = dispatch_group_create();
     }
     return self;
+}
+
+- (void)showLoadingInView:(UIView *)view {
+    if (_loadingView) {
+        [_loadingView removeFromSuperview];
+    }
+    
+    _loadingView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 120, 120)];
+    _loadingView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
+    _loadingView.layer.cornerRadius = 10;
+    _loadingView.center = CGPointMake(view.bounds.size.width/2, view.bounds.size.height/2);
+    _loadingView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+    
+    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+    indicator.center = CGPointMake(60, 50);
+    [indicator startAnimating];
+    [_loadingView addSubview:indicator];
+    
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 80, 120, 30)];
+    label.text = @"下载媒体中...";
+    label.textColor = [UIColor whiteColor];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.font = [UIFont systemFontOfSize:14];
+    [_loadingView addSubview:label];
+    
+    [view addSubview:_loadingView];
+}
+
+- (void)hideLoading {
+    if (_loadingView) {
+        [_loadingView removeFromSuperview];
+        _loadingView = nil;
+    }
+}
+
+- (BOOL)isMediaItemDownloaded:(WCMediaItem *)mediaItem {
+    // 根据WCMediaItem.h中的方法，检查是否已下载
+    @try {
+        // 根据类型检查不同的下载状态
+        if (mediaItem.type == 2 || mediaItem.type == 6) { // 视频类型
+            if ([mediaItem respondsToSelector:@selector(hasSight)]) {
+                return [mediaItem hasSight];
+            }
+            if ([mediaItem respondsToSelector:@selector(hasAttachVideo)]) {
+                return [mediaItem hasAttachVideo];
+            }
+        } else { // 图片类型
+            if ([mediaItem respondsToSelector:@selector(hasData)]) {
+                return [mediaItem hasData];
+            }
+        }
+        
+        // 检查媒体ID是否在已下载列表中
+        NSString *mediaID = mediaItem.mid;
+        if (!mediaID) return NO;
+        
+        // 检查本地文件是否存在
+        NSString *documentsPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *snsPath = [documentsPath stringByAppendingPathComponent:@"Sns"];
+        
+        // 检查多种可能的文件路径
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        
+        // 检查是否有对应的缓存文件
+        NSString *midHash = [self md5Hash:mediaID];
+        NSString *cachePath1 = [snsPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.mp4", midHash]];
+        NSString *cachePath2 = [snsPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.jpg", midHash]];
+        NSString *cachePath3 = [snsPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.png", midHash]];
+        
+        if ([fileManager fileExistsAtPath:cachePath1] || 
+            [fileManager fileExistsAtPath:cachePath2] || 
+            [fileManager fileExistsAtPath:cachePath3]) {
+            return YES;
+        }
+        
+    } @catch (NSException *exception) {
+        NSLog(@"DDTimeline: 检查下载状态异常: %@", exception);
+    }
+    
+    return NO;
+}
+
+- (NSString *)md5Hash:(NSString *)string {
+    // 简单的哈希函数，用于生成文件名
+    const char *cStr = [string UTF8String];
+    unsigned char result[16];
+    __block NSString *hash = @"";
+    
+    // 简化版本，实际应该使用更安全的哈希
+    @autoreleasepool {
+        NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
+        if (data.length > 0) {
+            hash = [NSString stringWithFormat:@"%08lx", (unsigned long)[data hash]];
+        }
+    }
+    
+    return hash;
 }
 
 - (void)downloadMediaForDataItem:(WCDataItem *)dataItem
@@ -148,6 +248,10 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
         mediaList = [dataItem valueForKey:@"mediaList"];
     } @catch (NSException *exception) {
         NSLog(@"DDTimeline: 无法获取mediaList: %@", exception);
+        if (completion) {
+            completion(NO, [NSError errorWithDomain:@"DDTimelineForward" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"无法获取媒体列表"}]);
+        }
+        return;
     }
     
     NSArray *mediaItems = mediaList.media;
@@ -159,34 +263,57 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
         return;
     }
     
-    NSLog(@"DDTimeline: 开始下载 %lu 个媒体文件", (unsigned long)mediaItems.count);
+    NSLog(@"DDTimeline: 发现 %lu 个媒体文件", (unsigned long)mediaItems.count);
     
-    [viewController showLoadingView];
+    // 检查哪些需要下载
+    NSMutableArray *needDownloadItems = [NSMutableArray array];
+    for (WCMediaItem *mediaItem in mediaItems) {
+        if (![self isMediaItemDownloaded:mediaItem]) {
+            [needDownloadItems addObject:mediaItem];
+        } else {
+            NSLog(@"DDTimeline: 媒体已下载: %@", mediaItem.mid);
+        }
+    }
     
-    // 重置计数器
+    if (needDownloadItems.count == 0) {
+        NSLog(@"DDTimeline: 所有媒体都已下载");
+        if (completion) {
+            completion(YES, nil);
+        }
+        return;
+    }
+    
+    NSLog(@"DDTimeline: 需要下载 %lu 个媒体文件", (unsigned long)needDownloadItems.count);
+    
+    // 显示加载视图
+    [self showLoadingInView:viewController.view];
+    
+    // 保存回调
+    _completion = completion;
     _successCount = 0;
     _failCount = 0;
+    _totalCount = needDownloadItems.count;
     
-    // 下载每个媒体文件
-    for (WCMediaItem *mediaItem in mediaItems) {
-        if ([self mediaItemAlreadyDownloaded:mediaItem]) {
-            NSLog(@"DDTimeline: 媒体已下载: %@", mediaItem.mid);
-            _successCount++;
-            continue;
-        }
-        
-        dispatch_group_enter(_downloadGroup);
-        
+    // 开始下载每个媒体
+    for (WCMediaItem *mediaItem in needDownloadItems) {
+        [self downloadSingleMedia:mediaItem forDataItem:dataItem];
+    }
+}
+
+- (void)downloadSingleMedia:(WCMediaItem *)mediaItem forDataItem:(WCDataItem *)dataItem {
+    @try {
         // 创建下载器
-        WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] init];
-        [downloader setValue:dataItem forKey:@"dataItem"];
-        [downloader setValue:mediaItem forKey:@"mediaItem"];
+        WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] initWithDataItem:dataItem mediaItem:mediaItem];
         
-        NSString *key = [NSString stringWithFormat:@"%@_%@", dataItem.username, mediaItem.mid];
+        NSString *key = [NSString stringWithFormat:@"%@_%@", dataItem.username, mediaItem.mid ?: @""];
         _downloaders[key] = downloader;
         
+        // 开始下载
         [downloader startDownloadWithCompletionHandler:^(NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSString *key = [NSString stringWithFormat:@"%@_%@", dataItem.username, mediaItem.mid ?: @""];
+                [self->_downloaders removeObjectForKey:key];
+                
                 if (error) {
                     NSLog(@"DDTimeline: 下载失败: %@, error: %@", mediaItem.mid, error);
                     self->_failCount++;
@@ -195,67 +322,46 @@ static NSString *const kAutoDownloadEnabledKey = @"DDAutoDownloadEnabled";
                     self->_successCount++;
                 }
                 
-                [self->_downloaders removeObjectForKey:key];
-                dispatch_group_leave(self->_downloadGroup);
+                // 检查是否全部完成
+                if (self->_successCount + self->_failCount >= self->_totalCount) {
+                    [self downloadCompleted];
+                }
             });
         }];
-    }
-    
-    // 所有下载完成后回调
-    dispatch_group_notify(_downloadGroup, dispatch_get_main_queue(), ^{
-        [viewController hideLoadingView];
-        
-        BOOL success = _failCount == 0;
-        NSError *error = nil;
-        
-        if (_failCount > 0) {
-            NSString *errorMsg = [NSString stringWithFormat:@"成功下载 %ld 个，失败 %ld 个", (long)_successCount, (long)_failCount];
-            error = [NSError errorWithDomain:@"DDTimelineForward" 
-                                        code:-1 
-                                    userInfo:@{NSLocalizedDescriptionKey: errorMsg}];
-            NSLog(@"DDTimeline: %@", errorMsg);
-        } else {
-            NSLog(@"DDTimeline: 所有媒体下载完成");
-        }
-        
-        if (completion) {
-            completion(success, error);
-        }
-    });
-}
-
-- (BOOL)mediaItemAlreadyDownloaded:(WCMediaItem *)mediaItem {
-    @try {
-        // 尝试调用hasDownloaded方法
-        if ([mediaItem respondsToSelector:@selector(hasDownloaded)]) {
-            BOOL downloaded = [mediaItem hasDownloaded];
-            return downloaded;
-        }
-        
-        // 或者检查本地文件是否存在
-        NSString *mediaID = mediaItem.mid;
-        if (!mediaID) return NO;
-        
-        // 构建可能的文件路径
-        NSString *documentsPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-        NSString *snsPath = [documentsPath stringByAppendingPathComponent:@"Sns"];
-        NSString *mediaPath = [snsPath stringByAppendingPathComponent:mediaID];
-        
-        if ([[NSFileManager defaultManager] fileExistsAtPath:mediaPath]) {
-            return YES;
-        }
-        
-        // 检查是否有预览图
-        if (mediaItem.previewUrls && mediaItem.previewUrls.count > 0) {
-            // 这里可以添加更复杂的检查逻辑
-            return NO;
-        }
         
     } @catch (NSException *exception) {
-        NSLog(@"DDTimeline: 检查下载状态异常: %@", exception);
+        NSLog(@"DDTimeline: 创建下载器异常: %@", exception);
+        _failCount++;
+        
+        if (_successCount + _failCount >= _totalCount) {
+            [self downloadCompleted];
+        }
+    }
+}
+
+- (void)downloadCompleted {
+    [self hideLoading];
+    
+    BOOL success = _failCount == 0;
+    NSError *error = nil;
+    
+    if (_failCount > 0) {
+        NSString *errorMsg = [NSString stringWithFormat:@"成功下载 %ld 个，失败 %ld 个", (long)_successCount, (long)_failCount];
+        error = [NSError errorWithDomain:@"DDTimelineForward" 
+                                    code:-1 
+                                userInfo:@{NSLocalizedDescriptionKey: errorMsg}];
+        NSLog(@"DDTimeline: %@", errorMsg);
+    } else {
+        NSLog(@"DDTimeline: 所有媒体下载完成");
     }
     
-    return NO;
+    if (_completion) {
+        _completion(success, error);
+    }
+    
+    // 清理
+    _completion = nil;
+    [_downloaders removeAllObjects];
 }
 
 @end

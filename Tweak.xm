@@ -21,6 +21,10 @@
 @property(nonatomic) __weak UINavigationController *navigationController;
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2;
 - (double)buttonWidth:(id)arg1;
+
+// 添加转发相关方法声明
+- (void)dd_forwardTimeline:(UIButton *)sender;
+- (void)dd_openForwardViewController;
 @end
 
 @interface WCForwardViewController : UIViewController

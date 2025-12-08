@@ -43,7 +43,7 @@
 @property(readonly, nonatomic) WCMediaItem *mediaItem;
 @property(readonly, nonatomic) WCDataItem *dataItem;
 - (id)initWithDataItem:(id)arg1 mediaItem:(id)arg2;
-- (void)startDownloadWithCompletionHandler:(CDUnknownBlockType)arg1;
+- (void)startDownloadWithCompletionHandler:(void(^)(void))arg1;
 - (_Bool)hasDownloaded;
 @end
 
@@ -131,7 +131,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 - (void)updateProgress:(float)progress withStatus:(NSString *)status;
 - (void)show;
 - (void)hide;
-@property (nonatomic, copy) void (^onCancel)(void);
 @end
 
 @implementation DDProgressWindow {
@@ -451,10 +450,29 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 }
 
 %new
+- (void)dd_allDownloadsCompletedWithProgressWindow:(DDProgressWindow *)progressWindow dataItem:(WCDataItem *)dataItem {
+    __weak typeof(self) weakSelf = self;
+    
+    // 延迟关闭进度窗口并跳转
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [progressWindow hide];
+        [weakSelf dd_showForwardViewControllerWithDataItem:dataItem];
+    });
+}
+
+%new
+- (void)dd_showForwardViewControllerWithDataItem:(WCDataItem *)dataItem {
+    // 进入转发界面
+    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:dataItem];
+    if (self.navigationController) {
+        [self.navigationController pushViewController:forwardVC animated:YES];
+    }
+}
+
+%new
 - (void)dd_forwardTimeline:(UIButton *)sender {
     __weak typeof(self) weakSelf = self;
     WCDataItem *dataItem = self.m_item;
-    NSString *username = dataItem.username ?: @"未知用户";
     
     // 获取媒体数组
     NSArray *mediaItems = nil;
@@ -471,7 +489,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     if (!mediaItems || mediaItems.count == 0) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [progressWindow hide];
-            [weakSelf showForwardViewControllerWithDataItem:dataItem];
+            [weakSelf dd_showForwardViewControllerWithDataItem:dataItem];
         });
         return;
     }
@@ -489,7 +507,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
                                withStatus:[NSString stringWithFormat:@"跳过已下载文件 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
             
             if (completedCount == totalCount) {
-                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+                [self dd_allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
             }
             continue;
         }
@@ -502,7 +520,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
                                withStatus:[NSString stringWithFormat:@"已在下载队列 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
             
             if (completedCount == totalCount) {
-                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+                [self dd_allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
             }
             continue;
         }
@@ -513,23 +531,17 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
             [downloaders addObject:downloader];
             
             // 开始下载
-            [downloader startDownloadWithCompletionHandler:^(NSError *error) {
+            [downloader startDownloadWithCompletionHandler:^{
                 dispatch_async(dispatch_get_main_queue(), ^{
                     completedCount++;
                     
-                    if (error) {
-                        [progressWindow updateProgress:(float)completedCount/totalCount 
-                                           withStatus:[NSString stringWithFormat:@"下载失败 (%lu/%lu): %@", 
-                                                      (unsigned long)completedCount, (unsigned long)totalCount, error.localizedDescription]];
-                    } else {
-                        [progressWindow updateProgress:(float)completedCount/totalCount 
-                                           withStatus:[NSString stringWithFormat:@"下载完成 (%lu/%lu)", 
-                                                      (unsigned long)completedCount, (unsigned long)totalCount]];
-                    }
+                    [progressWindow updateProgress:(float)completedCount/totalCount 
+                                       withStatus:[NSString stringWithFormat:@"下载完成 (%lu/%lu)", 
+                                                  (unsigned long)completedCount, (unsigned long)totalCount]];
                     
                     // 所有下载完成
                     if (completedCount == totalCount) {
-                        [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+                        [self dd_allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
                     }
                 });
             }];
@@ -540,34 +552,14 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
                                withStatus:[NSString stringWithFormat:@"跳过无法下载的文件 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
             
             if (completedCount == totalCount) {
-                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+                [self dd_allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
             }
         }
     }
     
     // 如果所有文件都已跳过（已下载或在队列中）
     if (completedCount == totalCount && downloaders.count == 0) {
-        [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
-    }
-}
-
-%new
-- (void)allDownloadsCompletedWithProgressWindow:(DDProgressWindow *)progressWindow dataItem:(WCDataItem *)dataItem {
-    __weak typeof(self) weakSelf = self;
-    
-    // 延迟关闭进度窗口并跳转
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [progressWindow hide];
-        [weakSelf showForwardViewControllerWithDataItem:dataItem];
-    });
-}
-
-%new
-- (void)showForwardViewControllerWithDataItem:(WCDataItem *)dataItem {
-    // 进入转发界面
-    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:dataItem];
-    if (self.navigationController) {
-        [self.navigationController pushViewController:forwardVC animated:YES];
+        [self dd_allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
     }
 }
 

@@ -229,8 +229,3 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         [_cancelButton.bottomAnchor constraintLessThanOrEqualToAnchor:contentView.bottomAnchor constant:-20]
     ]];
 }
-
--## 更新了 Tweak.xm 中的分隔线颜色设置：浅色模式使用深黑色 (alpha 0.2)，深色模式使用白色 (alpha 0.3)。
- 同时，转发按钮的图标和文字已设置为白色。
-
- 请将以上代码复制到你的 Tweak.xm 文件中进行编译测试。

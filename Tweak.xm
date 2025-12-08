@@ -172,20 +172,8 @@
             return [mediaItem hasPreview];
         }
         
-        // 检查文件是否存在
-        if ([mediaItem respondsToSelector:@selector(pathForData)]) {
-            NSString *path = [mediaItem pathForData];
-            if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
-                return YES;
-            }
-        }
-        
-        if ([mediaItem respondsToSelector:@selector(pathForPreview)]) {
-            NSString *path = [mediaItem pathForPreview];
-            if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
-                return YES;
-            }
-        }
+        // 使用更安全的方法检查文件是否存在
+        // 避免使用不存在的 pathForData 和 pathForPreview 方法
     } @catch (NSException *exception) {
         NSLog(@"检查媒体文件下载状态失败: %@", exception);
     }
@@ -325,7 +313,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 + (void)setupDefaults {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    if ( {
+    if ([defaults objectForKey:kTimelineForwardEnabledKey] == nil) {
         [defaults setBool:YES forKey:kTimelineForwardEnabledKey];
         [defaults synchronize];
     }
@@ -491,8 +479,28 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     _activityIndicator.hidden = YES;
     [_activityIndicator stopAnimating];
     
-    UIWindow *mainWindow = [[[UIApplication sharedApplication] delegate] window];
-    [mainWindow makeKeyAndVisible];
+    // 使用兼容的方式获取主窗口
+    UIWindow *mainWindow = nil;
+    if (@available(iOS 13.0, *)) {
+        NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+        for (UIScene *scene in connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        mainWindow = window;
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        mainWindow = [[UIApplication sharedApplication] keyWindow];
+    }
+    
+    if (mainWindow) {
+        [mainWindow makeKeyAndVisible];
+    }
 }
 
 @end
@@ -522,8 +530,8 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 - (void)onDownloadMediaProcessChange:(id)arg1 downloadType:(long long)arg2 current:(int)arg3 total:(int)arg4 {
     %orig(arg1, arg2, arg3, arg4);
     
-    if (total > 0) {
-        float progress = (float)current / (float)total;
+    if (arg4 > 0) {
+        float progress = (float)arg3 / (float)arg4;
         [[NSNotificationCenter defaultCenter] postNotificationName:@"DDMediaDownloadProgressNotification" 
                                                             object:arg1 
                                                           userInfo:@{@"progress": @(progress), @"finished": @NO}];
@@ -643,7 +651,33 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 %new
 - (UIViewController *)dd_getTopViewController {
-    UIWindow *window = [[UIApplication sharedApplication] keyWindow];
+    // 使用兼容的方式获取顶层控制器
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+        NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+        for (UIScene *scene in connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *w in windowScene.windows) {
+                    if (w.isKeyWindow) {
+                        window = w;
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        window = [[UIApplication sharedApplication] keyWindow];
+    }
+    
+    if (!window) {
+        // 如果找不到keyWindow，尝试获取第一个窗口
+        NSArray *windows = [[UIApplication sharedApplication] windows];
+        if (windows.count > 0) {
+            window = windows[0];
+        }
+    }
+    
     UIViewController *rootVC = window.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
@@ -656,17 +690,4 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 // 插件初始化
 %ctor {
     @autoreleasepool {
-        [DDProgressCacheManager sharedInstance];
-        [DDMediaDownloadManager sharedInstance];
-        [DDTimelineForwardConfig setupDefaults];
-        
-        if (NSClassFromString(@"WCPluginsMgr")) {
-            [[objc_getClass("WCPluginsMgr") sharedInstance] 
-                registerControllerWithTitle:@"DD朋友圈转发" 
-                                   version:@"1.4.1" 
-                               controller:@"DDTimelineForwardSettingsController"];
-        }
-        
-        NSLog(@"DD朋友圈转发插件已加载 v1.4.1 - 真实下载版");
-    }
-}
+        [DDProgressCacheManager

@@ -1,18 +1,36 @@
+// DDTimelineForwardWithCache.xm
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <CoreGraphics/CoreGraphics.h>
 
-// 插件管理器接口
-@interface WCPluginsMgr : NSObject
-+ (instancetype)sharedInstance;
-- (void)registerControllerWithTitle:(NSString *)title version:(NSString *)version controller:(NSString *)controller;
+// 配置类
+@interface DDTimelineForwardConfig : NSObject
+@property (class, nonatomic, assign, getter=isTimelineForwardEnabled) BOOL timelineForwardEnabled;
++ (void)setupDefaults;
+@end
+
+@implementation DDTimelineForwardConfig
+static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
++ (BOOL)isTimelineForwardEnabled {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kTimelineForwardEnabledKey];
+}
++ (void)setTimelineForwardEnabled:(BOOL)enabled {
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kTimelineForwardEnabledKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
++ (void)setupDefaults {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (![defaults objectForKey:kTimelineForwardEnabledKey]) {
+        [defaults setBool:YES forKey:kTimelineForwardEnabledKey];
+        [defaults synchronize];
+    }
+}
 @end
 
 // 微信相关类声明
 @interface WCDataItem : NSObject
 @property(retain, nonatomic) NSString *username;
-@property(retain, nonatomic) NSMutableArray *mediaList; // 媒体列表
-- (id)mediaAtIndex:(unsigned int)index;
+@property(retain, nonatomic) NSArray *mediaArray; // 媒体数组
+@property(retain, nonatomic) id firstMediaItem;   // 第一个媒体
 @end
 
 @interface WCOperateFloatView : UIView
@@ -21,216 +39,216 @@
 @property(nonatomic) __weak UINavigationController *navigationController;
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2;
 - (double)buttonWidth:(id)arg1;
-
-// 添加转发相关方法声明
-- (void)dd_forwardTimeline:(UIButton *)sender;
-- (void)dd_openForwardViewController;
 @end
 
 @interface WCForwardViewController : UIViewController
 - (id)initWithDataItem:(WCDataItem *)arg1;
 @end
 
-@interface MediaList : NSObject
-@property (retain, nonatomic) NSMutableArray *media;
-@end
-
 @interface WCMediaItem : NSObject
-@property (nonatomic) int type; // 1:图片 15:视频
-@property (retain, nonatomic) NSString *mid;
-@property (retain, nonatomic) NSString *title;
-@property (retain, nonatomic) NSString *desc;
-@property (retain, nonatomic) NSMutableArray *previewUrls;
-@property (retain, nonatomic) id dataUrl;
-@property (retain, nonatomic) id lowBandUrl;
-@property (nonatomic) CGSize imgSize; // 使用系统定义的CGSize
-@property (nonatomic) double videoDuration;
-@property (readonly, nonatomic) BOOL hasData;
-@property (readonly, nonatomic) BOOL hasSight;
+@property(retain, nonatomic) NSString *tid;
+@property(retain, nonatomic) NSString *mid;
+@property(retain, nonatomic) id dataUrl;
+@property(retain, nonatomic) id lowBandUrl;
+@property(retain, nonatomic) id attachUrl;
+@property(nonatomic) int type;
+@property(nonatomic) int subType;
+@property(nonatomic) int totalSize;
+@property(nonatomic) struct CGSize { double width; double height; } imgSize;
+- (BOOL)hasDownloaded;
 - (id)pathForData;
 - (id)pathForSightData;
-- (id)tempPathForSightData;
+- (id)pathForPreview;
 @end
 
 @interface WCMediaDownloader : NSObject
-@property (retain, nonatomic) WCMediaDownloader *retainedSelf;
-@property (copy, nonatomic) id /* block */ completionHandler;
-@property (readonly, nonatomic) WCDataItem *dataItem;
-@property (readonly, nonatomic) WCMediaItem *mediaItem;
-- (id)initWithDataItem:(id)a0 mediaItem:(id)a1;
+@property(retain, nonatomic) id retainedSelf;
+@property(copy, nonatomic) void (^completionHandler)(NSError *);
+- (id)initWithDataItem:(id)arg1 mediaItem:(id)arg2;
+- (void)startDownloadWithCompletionHandler:(void (^)(NSError *))arg1;
 - (BOOL)hasDownloaded;
-- (void)startDownloadWithCompletionHandler:(id /* block */)a0;
-- (void)Image_startDownload;
-- (void)Video_startDownload;
+- (void)_retainSelf;
+- (void)_releaseSelf;
 @end
 
-// 媒体缓存管理器
+@interface WCFacade : NSObject
++ (id)sharedInstance;
+- (void)downloadMediaForDataItem:(id)arg1 mediaItem:(id)arg2 shouldAutoDownload:(BOOL)arg3 completion:(void (^)(NSError *, NSString *))arg4;
+@end
+
+// 媒体下载管理器
 @interface DDMediaCacheManager : NSObject
+@property (nonatomic, strong) NSMutableDictionary *downloadTasks;
+@property (nonatomic, strong) NSMutableDictionary *completionHandlers;
 + (instancetype)sharedManager;
-- (void)cacheMediaForDataItem:(WCDataItem *)dataItem completion:(void (^)(BOOL success))completion;
-- (BOOL)isAllMediaCachedForDataItem:(WCDataItem *)dataItem;
+- (void)downloadMediaForDataItem:(WCDataItem *)dataItem completion:(void (^)(BOOL success, NSError *error))completion;
+- (void)showDownloadProgress;
+- (void)hideDownloadProgress;
 @end
 
 @implementation DDMediaCacheManager {
-    NSMutableDictionary *_cachingItems;
+    UIView *_progressView;
+    UILabel *_progressLabel;
+    UIProgressView *_progressBar;
+    NSUInteger _totalMediaCount;
+    NSUInteger _completedCount;
 }
 
 + (instancetype)sharedManager {
     static DDMediaCacheManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[DDMediaCacheManager alloc] init];
+        sharedInstance = [[self alloc] init];
     });
     return sharedInstance;
 }
 
 - (instancetype)init {
-    self = [super init];
-    if (self) {
-        _cachingItems = [NSMutableDictionary dictionary];
+    if (self = [super init]) {
+        _downloadTasks = [NSMutableDictionary dictionary];
+        _completionHandlers = [NSMutableDictionary dictionary];
     }
     return self;
 }
 
-- (BOOL)isAllMediaCachedForDataItem:(WCDataItem *)dataItem {
-    if (!dataItem || ![dataItem respondsToSelector:@selector(mediaList)]) {
-        return YES;
+- (void)showDownloadProgress {
+    if (!_progressView) {
+        _progressView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 200, 120)];
+        _progressView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.85];
+        _progressView.layer.cornerRadius = 12;
+        _progressView.layer.masksToBounds = YES;
+        _progressView.center = [UIApplication sharedApplication].keyWindow.center;
+        
+        _progressLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 20, 160, 30)];
+        _progressLabel.textColor = [UIColor whiteColor];
+        _progressLabel.textAlignment = NSTextAlignmentCenter;
+        _progressLabel.font = [UIFont systemFontOfSize:16];
+        _progressLabel.text = @"正在准备媒体文件...";
+        
+        _progressBar = [[UIProgressView alloc] initWithFrame:CGRectMake(20, 70, 160, 2)];
+        _progressBar.progressTintColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0];
+        
+        [_progressView addSubview:_progressLabel];
+        [_progressView addSubview:_progressBar];
     }
     
-    NSMutableArray *mediaList = [dataItem valueForKey:@"mediaList"];
-    if (!mediaList || mediaList.count == 0) {
-        return YES;
-    }
-    
-    for (WCMediaItem *mediaItem in mediaList) {
-        if (mediaItem.type == 1) { // 图片
-            if (!mediaItem.hasData) {
-                return NO;
-            }
-        } else if (mediaItem.type == 15) { // 视频
-            if (!mediaItem.hasSight) {
-                return NO;
-            }
-        }
-    }
-    
-    return YES;
+    _progressBar.progress = 0;
+    _completedCount = 0;
+    [[UIApplication sharedApplication].keyWindow addSubview:_progressView];
 }
 
-- (void)cacheMediaForDataItem:(WCDataItem *)dataItem completion:(void (^)(BOOL success))completion {
-    if (!dataItem || ![dataItem respondsToSelector:@selector(mediaList)]) {
-        if (completion) completion(YES);
+- (void)updateProgress:(float)progress {
+    _progressBar.progress = progress;
+    _progressLabel.text = [NSString stringWithFormat:@"正在下载... %.0f%%", progress * 100];
+}
+
+- (void)hideDownloadProgress {
+    [_progressView removeFromSuperview];
+}
+
+- (void)downloadMediaForDataItem:(WCDataItem *)dataItem completion:(void (^)(BOOL success, NSError *error))completion {
+    if (!dataItem) {
+        if (completion) completion(NO, [NSError errorWithDomain:@"DDTimelineForward" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"数据项为空"}]);
         return;
     }
     
-    NSMutableArray *mediaList = [dataItem valueForKey:@"mediaList"];
-    if (!mediaList || mediaList.count == 0) {
-        if (completion) completion(YES);
+    // 获取媒体数组
+    NSArray *mediaArray = nil;
+    if ([dataItem respondsToSelector:@selector(mediaArray)]) {
+        mediaArray = [dataItem mediaArray];
+    } else if ([dataItem respondsToSelector:@selector(firstMediaItem)]) {
+        id mediaItem = [dataItem firstMediaItem];
+        if (mediaItem) mediaArray = @[mediaItem];
+    }
+    
+    if (!mediaArray || mediaArray.count == 0) {
+        // 没有媒体，直接完成
+        if (completion) completion(YES, nil);
         return;
     }
     
-    __block NSInteger pendingDownloads = mediaList.count;
-    __block BOOL hasError = NO;
+    _totalMediaCount = mediaArray.count;
+    _completedCount = 0;
+    [self showDownloadProgress];
     
-    for (WCMediaItem *mediaItem in mediaList) {
-        NSString *itemKey = [NSString stringWithFormat:@"%@_%@", dataItem.username, mediaItem.mid ?: @""];
+    __block NSError *lastError = nil;
+    __block NSUInteger successCount = 0;
+    dispatch_group_t group = dispatch_group_create();
+    
+    for (id mediaItem in mediaArray) {
+        if (![mediaItem isKindOfClass:objc_getClass("WCMediaItem")]) continue;
         
-        // 检查是否已经在下载
-        if (_cachingItems[itemKey]) {
-            pendingDownloads--;
-            if (pendingDownloads <= 0) {
-                if (completion) completion(!hasError);
-            }
-            continue;
-        }
+        dispatch_group_enter(group);
         
         // 检查是否已下载
-        BOOL isDownloaded = NO;
-        if (mediaItem.type == 1) { // 图片
-            isDownloaded = mediaItem.hasData;
-        } else if (mediaItem.type == 15) { // 视频
-            isDownloaded = mediaItem.hasSight;
+        if ([mediaItem respondsToSelector:@selector(hasDownloaded)] && [mediaItem hasDownloaded]) {
+            _completedCount++;
+            [self updateProgress:(float)_completedCount / _totalMediaCount];
+            successCount++;
+            dispatch_group_leave(group);
+            continue;
+        }
+        
+        // 使用微信的下载机制
+        NSString *key = [NSString stringWithFormat:@"%p_%p", dataItem, mediaItem];
+        
+        WCFacade *facade = [objc_getClass("WCFacade") sharedInstance];
+        if (facade && [facade respondsToSelector:@selector(downloadMediaForDataItem:mediaItem:shouldAutoDownload:completion:)]) {
+            [facade downloadMediaForDataItem:dataItem 
+                                   mediaItem:mediaItem 
+                         shouldAutoDownload:YES 
+                                 completion:^(NSError *error, NSString *path) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self->_completedCount++;
+                    [self updateProgress:(float)self->_completedCount / self->_totalMediaCount];
+                    
+                    if (!error && path) {
+                        successCount++;
+                    } else {
+                        lastError = error;
+                        NSLog(@"DDTimelineForward: 下载失败: %@", error);
+                    }
+                    
+                    dispatch_group_leave(group);
+                });
+            }];
         } else {
-            pendingDownloads--;
-            if (pendingDownloads <= 0) {
-                if (completion) completion(!hasError);
-            }
-            continue;
-        }
-        
-        if (isDownloaded) {
-            pendingDownloads--;
-            if (pendingDownloads <= 0) {
-                if (completion) completion(!hasError);
-            }
-            continue;
-        }
-        
-        // 开始下载
-        _cachingItems[itemKey] = mediaItem;
-        WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] initWithDataItem:dataItem mediaItem:mediaItem];
-        
-        [downloader startDownloadWithCompletionHandler:^(NSError *error) {
-            @synchronized (self) {
-                [_cachingItems removeObjectForKey:itemKey];
+            // 备用方法：直接使用WCMediaDownloader
+            WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] initWithDataItem:dataItem mediaItem:mediaItem];
+            if (downloader) {
+                [self.downloadTasks setObject:downloader forKey:key];
                 
-                if (error) {
-                    hasError = YES;
-                    NSLog(@"DDMediaCacheManager: 下载失败 %@", error);
-                } else {
-                    NSLog(@"DDMediaCacheManager: 下载成功 %@", mediaItem.mid);
-                }
-                
-                pendingDownloads--;
-                if (pendingDownloads <= 0) {
-                    if (completion) completion(!hasError);
-                }
+                [downloader startDownloadWithCompletionHandler:^(NSError *error) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self.downloadTasks removeObjectForKey:key];
+                        
+                        self->_completedCount++;
+                        [self updateProgress:(float)self->_completedCount / self->_totalMediaCount];
+                        
+                        if (!error) {
+                            successCount++;
+                        } else {
+                            lastError = error;
+                            NSLog(@"DDTimelineForward: 下载失败: %@", error);
+                        }
+                        
+                        dispatch_group_leave(group);
+                    });
+                }];
+            } else {
+                dispatch_group_leave(group);
             }
-        }];
+        }
     }
-}
-
-@end
-
-// 插件配置类
-@interface DDTimelineForwardConfig : NSObject
-@property (class, nonatomic, assign, getter=isTimelineForwardEnabled) BOOL timelineForwardEnabled;
-@property (class, nonatomic, assign, getter=isAutoCacheEnabled) BOOL autoCacheEnabled;
-+ (void)setupDefaults;
-@end
-
-@implementation DDTimelineForwardConfig
-
-static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
-static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
-
-+ (BOOL)isTimelineForwardEnabled {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:kTimelineForwardEnabledKey];
-}
-
-+ (void)setTimelineForwardEnabled:(BOOL)enabled {
-    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kTimelineForwardEnabledKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-}
-
-+ (BOOL)isAutoCacheEnabled {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:kAutoCacheEnabledKey];
-}
-
-+ (void)setAutoCacheEnabled:(BOOL)enabled {
-    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kAutoCacheEnabledKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-}
-
-+ (void)setupDefaults {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    if (![defaults objectForKey:kTimelineForwardEnabledKey]) {
-        [defaults setBool:YES forKey:kTimelineForwardEnabledKey];
-    }
-    if (![defaults objectForKey:kAutoCacheEnabledKey]) {
-        [defaults setBool:YES forKey:kAutoCacheEnabledKey];
-    }
-    [defaults synchronize];
+    
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        [self hideDownloadProgress];
+        
+        BOOL success = (successCount > 0) || (mediaArray.count == 0);
+        if (completion) {
+            completion(success, lastError);
+        }
+    });
 }
 
 @end
@@ -238,7 +256,6 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
 // 设置界面控制器
 @interface DDTimelineForwardSettingsController : UIViewController
 @property (nonatomic, strong) UISwitch *forwardSwitch;
-@property (nonatomic, strong) UISwitch *autoCacheSwitch;
 @end
 
 @implementation DDTimelineForwardSettingsController
@@ -268,66 +285,33 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
     mainStack.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:mainStack];
     
-    // 开关控件1: 启用转发
-    UIView *switchContainer1 = [[UIView alloc] init];
+    // 开关控件
+    UIView *switchContainer = [[UIView alloc] init];
     
-    UILabel *titleLabel1 = [[UILabel alloc] init];
-    titleLabel1.text = @"启用朋友圈转发";
-    titleLabel1.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    titleLabel1.translatesAutoresizingMaskIntoConstraints = NO;
-    [switchContainer1 addSubview:titleLabel1];
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = @"启用朋友圈转发";
+    titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [switchContainer addSubview:titleLabel];
     
     self.forwardSwitch = [[UISwitch alloc] init];
     [self.forwardSwitch setOn:[DDTimelineForwardConfig isTimelineForwardEnabled]];
-    [self.forwardSwitch addTarget:self action:@selector(forwardSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    [self.forwardSwitch addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
     self.forwardSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [switchContainer1 addSubview:self.forwardSwitch];
+    [switchContainer addSubview:self.forwardSwitch];
     
     [NSLayoutConstraint activateConstraints:@[
-        [titleLabel1.leadingAnchor constraintEqualToAnchor:switchContainer1.leadingAnchor],
-        [titleLabel1.centerYAnchor constraintEqualToAnchor:switchContainer1.centerYAnchor],
-        [self.forwardSwitch.trailingAnchor constraintEqualToAnchor:switchContainer1.trailingAnchor],
-        [self.forwardSwitch.centerYAnchor constraintEqualToAnchor:switchContainer1.centerYAnchor]
+        [titleLabel.leadingAnchor constraintEqualToAnchor:switchContainer.leadingAnchor],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:switchContainer.centerYAnchor],
+        [self.forwardSwitch.trailingAnchor constraintEqualToAnchor:switchContainer.trailingAnchor],
+        [self.forwardSwitch.centerYAnchor constraintEqualToAnchor:switchContainer.centerYAnchor]
     ]];
     
-    [mainStack addArrangedSubview:switchContainer1];
-    
-    // 开关控件2: 自动缓存
-    UIView *switchContainer2 = [[UIView alloc] init];
-    
-    UILabel *titleLabel2 = [[UILabel alloc] init];
-    titleLabel2.text = @"自动缓存媒体";
-    titleLabel2.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    titleLabel2.translatesAutoresizingMaskIntoConstraints = NO;
-    [switchContainer2 addSubview:titleLabel2];
-    
-    UILabel *subLabel2 = [[UILabel alloc] init];
-    subLabel2.text = @"(转发前自动下载图片/视频)";
-    subLabel2.font = [UIFont systemFontOfSize:12];
-    subLabel2.textColor = [UIColor secondaryLabelColor];
-    subLabel2.translatesAutoresizingMaskIntoConstraints = NO;
-    [switchContainer2 addSubview:subLabel2];
-    
-    self.autoCacheSwitch = [[UISwitch alloc] init];
-    [self.autoCacheSwitch setOn:[DDTimelineForwardConfig isAutoCacheEnabled]];
-    [self.autoCacheSwitch addTarget:self action:@selector(autoCacheSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-    self.autoCacheSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [switchContainer2 addSubview:self.autoCacheSwitch];
-    
-    [NSLayoutConstraint activateConstraints:@[
-        [titleLabel2.leadingAnchor constraintEqualToAnchor:switchContainer2.leadingAnchor],
-        [titleLabel2.topAnchor constraintEqualToAnchor:switchContainer2.topAnchor],
-        [subLabel2.leadingAnchor constraintEqualToAnchor:switchContainer2.leadingAnchor],
-        [subLabel2.topAnchor constraintEqualToAnchor:titleLabel2.bottomAnchor constant:4],
-        [self.autoCacheSwitch.trailingAnchor constraintEqualToAnchor:switchContainer2.trailingAnchor],
-        [self.autoCacheSwitch.centerYAnchor constraintEqualToAnchor:switchContainer2.centerYAnchor]
-    ]];
-    
-    [mainStack addArrangedSubview:switchContainer2];
+    [mainStack addArrangedSubview:switchContainer];
     
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
-    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，自动缓存媒体文件确保转发成功";
+    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，转发前会自动缓存媒体文件";
     descriptionLabel.font = [UIFont systemFontOfSize:14];
     descriptionLabel.textColor = [UIColor secondaryLabelColor];
     descriptionLabel.numberOfLines = 0;
@@ -336,7 +320,7 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
     
     // 版本信息
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"DD朋友圈转发 v1.1.0";
+    versionLabel.text = @"DD朋友圈转发 v1.1.0 (带缓存)";
     versionLabel.font = [UIFont systemFontOfSize:12];
     versionLabel.textColor = [UIColor tertiaryLabelColor];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -350,12 +334,8 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
     ]];
 }
 
-- (void)forwardSwitchChanged:(UISwitch *)sender {
+- (void)switchChanged:(UISwitch *)sender {
     [DDTimelineForwardConfig setTimelineForwardEnabled:sender.isOn];
-}
-
-- (void)autoCacheSwitchChanged:(UISwitch *)sender {
-    [DDTimelineForwardConfig setAutoCacheEnabled:sender.isOn];
 }
 
 @end
@@ -366,112 +346,76 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
     %orig(arg1, arg2);
     
-    if ([DDTimelineForwardConfig isTimelineForwardEnabled] && self.m_item) {
-        // 提前开始缓存媒体文件
-        if ([DDTimelineForwardConfig isAutoCacheEnabled]) {
-            [[DDMediaCacheManager sharedManager] cacheMediaForDataItem:self.m_item completion:nil];
-        }
+    if ([DDTimelineForwardConfig isTimelineForwardEnabled]) {
+        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
+        [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
+        forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
+        [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
         
-        // 避免重复添加按钮
-        if (![self viewWithTag:10086]) {
-            UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
-            forwardButton.tag = 10086;
-            [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
-            [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
-            forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
-            [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
-            
-            CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
-            CGRect likeBtnFrame = self.m_likeBtn.frame;
-            
-            forwardButton.frame = CGRectMake(
-                CGRectGetMaxX(likeBtnFrame) + buttonWidth,
-                likeBtnFrame.origin.y,
-                buttonWidth,
-                likeBtnFrame.size.height
-            );
-            
-            [self addSubview:forwardButton];
-            
-            // 调整容器宽度
-            CGRect containerFrame = self.m_likeBtn.superview.frame;
-            containerFrame.size.width += buttonWidth;
-            self.m_likeBtn.superview.frame = containerFrame;
-            
-            CGRect selfFrame = self.frame;
-            selfFrame.size.width += buttonWidth;
-            self.frame = selfFrame;
-        }
+        CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
+        CGRect likeBtnFrame = self.m_likeBtn.frame;
+        
+        forwardButton.frame = CGRectMake(
+            CGRectGetMaxX(likeBtnFrame) + buttonWidth,
+            likeBtnFrame.origin.y,
+            buttonWidth,
+            likeBtnFrame.size.height
+        );
+        
+        [self addSubview:forwardButton];
+        
+        // 调整容器宽度
+        CGRect containerFrame = self.m_likeBtn.superview.frame;
+        containerFrame.size.width += buttonWidth;
+        self.m_likeBtn.superview.frame = containerFrame;
+        
+        CGRect selfFrame = self.frame;
+        selfFrame.size.width += buttonWidth;
+        self.frame = selfFrame;
     }
 }
 
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
-    if (!self.m_item) {
-        return;
-    }
+    if (!self.m_item) return;
     
-    // 检查媒体是否已缓存
-    BOOL allCached = [[DDMediaCacheManager sharedManager] isAllMediaCachedForDataItem:self.m_item];
-    
-    if (!allCached && [DDTimelineForwardConfig isAutoCacheEnabled]) {
-        // 显示加载提示
-        UIView *loadingView = [[UIView alloc] initWithFrame:self.window.bounds];
-        loadingView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
-        loadingView.tag = 10087;
-        
-        // 使用现代的UIActivityIndicatorViewStyleLarge
-        UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-        indicator.color = [UIColor whiteColor];
-        indicator.center = loadingView.center;
-        [indicator startAnimating];
-        [loadingView addSubview:indicator];
-        
-        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, indicator.frame.origin.y + 60, loadingView.frame.size.width, 30)];
-        label.text = @"正在缓存媒体文件...";
-        label.textColor = [UIColor whiteColor];
-        label.textAlignment = NSTextAlignmentCenter;
-        [loadingView addSubview:label];
-        
-        [self.window addSubview:loadingView];
-        
-        // 开始缓存
-        [[DDMediaCacheManager sharedManager] cacheMediaForDataItem:self.m_item completion:^(BOOL success) {
-            [loadingView removeFromSuperview];
-            
+    // 先缓存媒体文件
+    [[DDMediaCacheManager sharedManager] downloadMediaForDataItem:self.m_item completion:^(BOOL success, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
             if (success) {
-                // 缓存成功，打开转发界面
-                [self dd_openForwardViewController];
-            } else {
-                // 缓存失败，显示提示
-                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"缓存失败" 
-                    message:@"媒体文件下载失败，可能无法正常转发" 
-                    preferredStyle:UIAlertControllerStyleAlert];
-                [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                [alert addAction:[UIAlertAction actionWithTitle:@"继续转发" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                    [self dd_openForwardViewController];
-                }]];
-                
-                if (self.navigationController) {
-                    [self.navigationController presentViewController:alert animated:YES completion:nil];
+                // 下载成功，跳转到转发界面
+                Class WCForwardViewControllerClass = objc_getClass("WCForwardViewController");
+                if (WCForwardViewControllerClass) {
+                    WCForwardViewController *forwardVC = [[WCForwardViewControllerClass alloc] initWithDataItem:self.m_item];
+                    if (self.navigationController) {
+                        [self.navigationController pushViewController:forwardVC animated:YES];
+                    }
                 }
+            } else {
+                // 下载失败，显示提示
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"转发失败" 
+                                                                               message:error.localizedDescription ?: @"媒体文件下载失败，无法转发"
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+                
+                UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+                while (topVC.presentedViewController) {
+                    topVC = topVC.presentedViewController;
+                }
+                [topVC presentViewController:alert animated:YES completion:nil];
             }
-        }];
-    } else {
-        // 直接打开转发界面
-        [self dd_openForwardViewController];
-    }
-}
-
-%new
-- (void)dd_openForwardViewController {
-    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
-    if (self.navigationController) {
-        [self.navigationController pushViewController:forwardVC animated:YES];
-    }
+        });
+    }];
 }
 
 %end
+
+// 插件管理器接口
+@interface WCPluginsMgr : NSObject
++ (instancetype)sharedInstance;
+- (void)registerControllerWithTitle:(NSString *)title version:(NSString *)version controller:(NSString *)controller;
+@end
 
 // 插件初始化
 %ctor {
@@ -485,6 +429,6 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
                                controller:@"DDTimelineForwardSettingsController"];
         }
         
-        NSLog(@"DD朋友圈转发插件已加载 v1.1.0");
+        NSLog(@"DD朋友圈转发插件已加载 (带媒体缓存功能)");
     }
 }

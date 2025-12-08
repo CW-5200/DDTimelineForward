@@ -476,62 +476,28 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         UIColor *buttonColor = [likeBtn titleColorForState:UIControlStateNormal];
         UIFont *buttonFont = likeBtn.titleLabel.font;
         
-        // 创建转发图标 - 使用与系统一致的图标样式
-        UIImage *forwardIcon = nil;
-        
-        // 尝试使用系统图标
-        if (@available(iOS 13.0, *)) {
-            forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.forward"];
-        }
-        
-        if (!forwardIcon) {
-            // 备用图标创建
-            UIGraphicsBeginImageContextWithOptions(CGSizeMake(20, 20), NO, 0.0);
-            CGContextRef context = UIGraphicsGetCurrentContext();
-            
-            // 绘制箭头图标
-            [buttonColor setStroke];
-            [buttonColor setFill];
-            
-            CGContextSetLineWidth(context, 2.0);
-            CGContextSetLineCap(context, kCGLineCapRound);
-            CGContextSetLineJoin(context, kCGLineJoinRound);
-            
-            // 绘制箭头形状
-            CGContextMoveToPoint(context, 6, 6);
-            CGContextAddLineToPoint(context, 14, 10);
-            CGContextAddLineToPoint(context, 6, 14);
-            
-            // 绘制箭头头部
-            CGContextMoveToPoint(context, 14, 10);
-            CGContextAddLineToPoint(context, 18, 7);
-            CGContextAddLineToPoint(context, 18, 13);
-            CGContextAddLineToPoint(context, 14, 10);
-            
-            CGContextStrokePath(context);
-            forwardIcon = UIGraphicsGetImageFromCurrentImageContext();
-            UIGraphicsEndImageContext();
-        }
-        
+        // 创建转发图标
+        UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.forward"];
         if (forwardIcon) {
             forwardIcon = [forwardIcon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-            [forwardButton setImage:forwardIcon forState:UIControlStateNormal];
-            forwardButton.tintColor = buttonColor;
         }
         
-        // 设置按钮文字
-        [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
-        [forwardButton setTitleColor:buttonColor forState:UIControlStateNormal];
-        forwardButton.titleLabel.font = buttonFont;
+        // 使用 UIButtonConfiguration (iOS 15+)
+        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+        config.image = forwardIcon;
+        config.title = @"转发";
+        config.imagePlacement = NSDirectionalRectEdgeLeading; // 图片在左侧
+        config.imagePadding = 6; // 图片和文字间距
+        config.baseForegroundColor = buttonColor;
         
-        // 调整图片和文字的位置（与系统按钮保持一致）
-        forwardButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-        forwardButton.titleEdgeInsets = UIEdgeInsetsMake(0, 5, 0, 0);
-        forwardButton.imageEdgeInsets = UIEdgeInsetsMake(0, -2, 0, 0);
+        // 设置字体
+        config.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *textAttributes) {
+            NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
+            newAttributes[NSFontAttributeName] = buttonFont;
+            return newAttributes;
+        };
         
-        // 设置按钮内容布局（图片在左，文字在右）
-        forwardButton.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
-        
+        forwardButton.configuration = config;
         [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
         
         // 设置按钮位置
@@ -546,13 +512,13 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
             commentBtn.frame = CGRectMake(currentX, commentBtn.frame.origin.y, buttonWidth, commentBtn.frame.size.height);
             currentX += buttonWidth;
             
-            // 添加系统风格的分割线（与微信原生分割线保持一致）
+            // 添加系统风格的分割线
             UIView *separator = [[UIView alloc] init];
-            separator.backgroundColor = [UIColor colorWithWhite:0.8 alpha:0.6]; // 与系统分割线颜色一致
+            separator.backgroundColor = [UIColor colorWithWhite:0.8 alpha:0.6];
             separator.frame = CGRectMake(currentX, 
-                                       likeBtn.frame.size.height * 0.2, // 垂直居中
-                                       1.0 / [UIScreen mainScreen].scale, // 物理像素宽度
-                                       likeBtn.frame.size.height * 0.6); // 高度为按钮高度的60%
+                                       likeBtn.frame.size.height * 0.2,
+                                       1.0 / [UIScreen mainScreen].scale,
+                                       likeBtn.frame.size.height * 0.6);
             separator.alpha = 0.6;
             [buttonContainer addSubview:separator];
             
@@ -577,7 +543,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         CGRect selfFrame = self.frame;
         selfFrame.size.width = currentX;
         
-        // 根据按钮数量调整浮窗位置，使其保持居中或适当偏移
+        // 根据按钮数量调整浮窗位置
         CGFloat offset = (selfFrame.size.width - containerFrame.size.width) / 2;
         selfFrame.origin.x -= offset;
         
@@ -591,7 +557,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
-    // 保持原有的转发逻辑不变
     __weak typeof(self) weakSelf = self;
     NSString *username = self.m_item.username ?: @"未知用户";
     NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", username];

@@ -229,3 +229,361 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         [_cancelButton.bottomAnchor constraintLessThanOrEqualToAnchor:contentView.bottomAnchor constant:-20]
     ]];
 }
+
+- (void)updateProgress:(float)progress {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // 更新百分比标签（增加"正在缓存"前缀）
+        int percent = (int)(progress * 100);
+        _percentLabel.text = [NSString stringWithFormat:@"正在缓存%d%%", percent];
+        
+        // 保存进度到缓存
+        NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", _username];
+        [[DDProgressCacheManager sharedInstance] saveProgress:progress forKey:cacheKey];
+        
+        // 完成时改变颜色和文本
+        if (progress >= 1.0) {
+            _percentLabel.text = @"缓存完成!";
+            _percentLabel.textColor = [UIColor systemGreenColor];
+        }
+    });
+}
+
+- (void)cancelButtonPressed {
+    [self hide];
+    NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", _username];
+    [[DDProgressCacheManager sharedInstance] clearProgressForKey:cacheKey];
+}
+
+- (void)show {
+    self.hidden = NO;
+    [self makeKeyAndVisible];
+}
+
+- (void)hide {
+    self.hidden = YES;
+    _activityIndicator.hidden = YES;
+    [_activityIndicator stopAnimating];
+    
+    UIWindow *mainWindow = [[[UIApplication sharedApplication] delegate] window];
+    [mainWindow makeKeyAndVisible];
+}
+
+@end
+
+// 设置界面控制器
+@interface DDTimelineForwardSettingsController : UIViewController
+@property (nonatomic, strong) UISwitch *forwardSwitch;
+@end
+
+@implementation DDTimelineForwardSettingsController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    self.title = @"朋友圈转发设置";
+    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    
+    // 配置iOS 15+模态样式
+    UISheetPresentationController *sheet = self.sheetPresentationController;
+    if (sheet) {
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+        sheet.prefersGrabberVisible = YES;
+        sheet.preferredCornerRadius = 20.0;
+    }
+    
+    [self setupUI];
+}
+
+- (void)setupUI {
+    UIStackView *mainStack = [[UIStackView alloc] init];
+    mainStack.axis = UILayoutConstraintAxisVertical;
+    mainStack.spacing = 24;
+    mainStack.alignment = UIStackViewAlignmentFill;
+    mainStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:mainStack];
+    
+    // 开关控件
+    UIView *switchContainer = [[UIView alloc] init];
+    switchContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = @"启用朋友圈转发";
+    titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor labelColor];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [switchContainer addSubview:titleLabel];
+    
+    self.forwardSwitch = [[UISwitch alloc] init];
+    [self.forwardSwitch setOn:[DDTimelineForwardConfig isTimelineForwardEnabled]];
+    [self.forwardSwitch addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+    self.forwardSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [switchContainer addSubview:self.forwardSwitch];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [titleLabel.leadingAnchor constraintEqualToAnchor:switchContainer.leadingAnchor],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:switchContainer.centerYAnchor],
+        [self.forwardSwitch.trailingAnchor constraintEqualToAnchor:switchContainer.trailingAnchor],
+        [self.forwardSwitch.centerYAnchor constraintEqualToAnchor:switchContainer.centerYAnchor]
+    ]];
+    
+    [mainStack addArrangedSubview:switchContainer];
+    
+    // 说明文字
+    UILabel *descriptionLabel = [[UILabel alloc] init];
+    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
+    descriptionLabel.font = [UIFont systemFontOfSize:14];
+    descriptionLabel.textColor = [UIColor secondaryLabelColor];
+    descriptionLabel.numberOfLines = 0;
+    descriptionLabel.textAlignment = NSTextAlignmentCenter;
+    [mainStack addArrangedSubview:descriptionLabel];
+    
+    // 版本信息
+    UILabel *versionLabel = [[UILabel alloc] init];
+    versionLabel.text = @"DD朋友圈转发 v1.4.0";
+    versionLabel.font = [UIFont systemFontOfSize:12];
+    versionLabel.textColor = [UIColor tertiaryLabelColor];
+    versionLabel.textAlignment = NSTextAlignmentCenter;
+    [mainStack addArrangedSubview:versionLabel];
+    
+    // 布局约束
+    [NSLayoutConstraint activateConstraints:@[
+        [mainStack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
+        [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [switchContainer.heightAnchor constraintEqualToConstant:44]
+    ]];
+}
+
+- (void)switchChanged:(UISwitch *)sender {
+    [DDTimelineForwardConfig setTimelineForwardEnabled:sender.isOn];
+}
+
+@end
+
+// 自定义图标绘制类
+@interface DDForwardIconGenerator : NSObject
++ (UIImage *)generateForwardIconWithColor:(UIColor *)color size:(CGSize)size;
+@end
+
+@implementation DDForwardIconGenerator
+
++ (UIImage *)generateForwardIconWithColor:(UIColor *)color size:(CGSize)size {
+    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    
+    // 只设置描边颜色，不设置填充颜色，实现镂空效果
+    [color setStroke];
+    
+    // 绘制转发图标（镂空箭头样式）
+    CGFloat lineWidth = 1.8; // 稍微加粗，使镂空效果更明显
+    CGContextSetLineWidth(context, lineWidth);
+    
+    // 计算图标绘制区域，留出边距
+    CGFloat margin = 3.0;
+    CGRect drawRect = CGRectMake(margin, margin, size.width - 2*margin, size.height - 2*margin);
+    
+    // 绘制向右的镂空箭头
+    // 箭头主体线
+    CGFloat startX = drawRect.origin.x + 3.0;
+    CGFloat endX = drawRect.origin.x + drawRect.size.width - 3.0;
+    CGFloat centerY = CGRectGetMidY(drawRect);
+    
+    // 绘制箭头主体（水平线）
+    UIBezierPath *arrowPath = [UIBezierPath bezierPath];
+    [arrowPath moveToPoint:CGPointMake(startX, centerY)];
+    [arrowPath addLineToPoint:CGPointMake(endX - 4.0, centerY)];
+    
+    // 绘制箭头头部（三角形）- 只描边不填充
+    [arrowPath moveToPoint:CGPointMake(endX - 6.0, centerY - 4.0)];
+    [arrowPath addLineToPoint:CGPointMake(endX, centerY)];
+    [arrowPath addLineToPoint:CGPointMake(endX - 6.0, centerY + 4.0)];
+    
+    // 为了美观，可以添加一个小圆圈在箭头起点
+    UIBezierPath *circlePath = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(startX - 2.0, centerY - 2.0, 4.0, 4.0)];
+    
+    // 设置线条样式
+    arrowPath.lineWidth = lineWidth;
+    arrowPath.lineCapStyle = kCGLineCapRound;
+    arrowPath.lineJoinStyle = kCGLineJoinRound;
+    
+    circlePath.lineWidth = lineWidth;
+    
+    // 只描边，不填充
+    [arrowPath stroke];
+    [circlePath stroke];
+    
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    
+    return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+@end
+
+// Hook实现
+%hook WCOperateFloatView
+
+- (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
+    %orig(arg1, arg2);
+    
+    if ([DDTimelineForwardConfig isTimelineForwardEnabled]) {
+        UIButton *likeBtn = self.m_likeBtn;
+        UIButton *commentBtn = self.m_commentBtn;
+        
+        CGFloat buttonWidth = [self buttonWidth:likeBtn];
+        CGFloat buttonSpacing = 15.0; // 固定间距
+        
+        // 创建转发按钮
+        UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        forwardButton.frame = CGRectMake(0, 0, buttonWidth, likeBtn.frame.size.height);
+        
+        // 创建自定义转发图标（镂空箭头样式）
+        UIImage *forwardIcon = [DDForwardIconGenerator generateForwardIconWithColor:[UIColor whiteColor] 
+                                                                               size:CGSizeMake(16, 16)];
+        
+        // 创建图标视图
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:forwardIcon];
+        iconView.tintColor = [UIColor whiteColor]; // 图标颜色设置为白色
+        iconView.frame = CGRectMake(10, (forwardButton.frame.size.height - 16)/2, 16, 16);
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        [forwardButton addSubview:iconView];
+        
+        // 创建标题标签 - 使用系统细体，颜色改为白色
+        UILabel *titleLabel = [[UILabel alloc] init];
+        titleLabel.text = @"转发";
+        titleLabel.font = [UIFont systemFontOfSize:likeBtn.titleLabel.font.pointSize weight:UIFontWeightLight]; // 细体
+        titleLabel.textColor = [UIColor whiteColor]; // 文字颜色改为白色
+        titleLabel.textAlignment = NSTextAlignmentLeft;
+        titleLabel.frame = CGRectMake(30, 0, buttonWidth - 30, forwardButton.frame.size.height);
+        [forwardButton addSubview:titleLabel];
+        
+        [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
+        
+        // 获取按钮容器
+        UIView *buttonContainer = likeBtn.superview;
+        
+        // 设置按钮位置（顺序：点赞 -> 评论 -> | -> 转发）
+        CGFloat currentX = 0;
+        
+        // 点赞按钮位置（保持不变）
+        likeBtn.frame = CGRectMake(currentX, likeBtn.frame.origin.y, buttonWidth, likeBtn.frame.size.height);
+        currentX += buttonWidth + buttonSpacing;
+        
+        // 评论按钮位置（在点赞按钮右侧）
+        if (commentBtn) {
+            commentBtn.frame = CGRectMake(currentX, commentBtn.frame.origin.y, buttonWidth, commentBtn.frame.size.height);
+            currentX += buttonWidth;
+            
+            // 创建自定义分隔线
+            UIView *separator = [[UIView alloc] init];
+            
+            // 根据系统主题设置分隔线颜色
+            // 浅色模式：深黑色 (alpha 0.2)
+            // 深色模式：白色 (alpha 0.3)
+            separator.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull traitCollection) {
+                if (traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
+                    // 深色模式：白色，alpha 0.3
+                    return [UIColor colorWithWhite:1.0 alpha:0.3];
+                } else {
+                    // 浅色模式：深黑色，alpha 0.2
+                    return [UIColor colorWithWhite:0.0 alpha:0.2];
+                }
+            }];
+            
+            // 设置分隔符位置和尺寸
+            CGFloat separatorHeight = forwardButton.frame.size.height * 0.6;
+            CGFloat separatorY = (forwardButton.frame.size.height - separatorHeight) / 2;
+            separator.frame = CGRectMake(currentX, separatorY, 0.5, separatorHeight);
+            separator.layer.cornerRadius = 0.25; // 半圆角，宽度的一半
+            
+            [buttonContainer addSubview:separator];
+            currentX += 0.5 + buttonSpacing; // 分隔符宽度+间距
+        } else {
+            // 如果没有评论按钮，直接添加间距
+            currentX += buttonSpacing;
+        }
+        
+        // 转发按钮位置（在评论按钮右侧或点赞按钮右侧）
+        forwardButton.frame = CGRectMake(currentX, likeBtn.frame.origin.y, buttonWidth, likeBtn.frame.size.height);
+        currentX += buttonWidth;
+        
+        // 将转发按钮添加到容器
+        [buttonContainer addSubview:forwardButton];
+        
+        // 计算总宽度
+        CGFloat totalWidth = currentX;
+        
+        // 精确设置容器宽度（匹配按钮组总宽度）
+        CGRect containerFrame = buttonContainer.frame;
+        containerFrame.size.width = totalWidth;
+        buttonContainer.frame = containerFrame;
+        
+        // 精确设置浮窗宽度（匹配容器宽度）
+        CGRect selfFrame = self.frame;
+        selfFrame.size.width = totalWidth;
+        selfFrame.origin.x -= 90; // 整体向左移动
+        self.frame = selfFrame;
+    }
+}
+
+%new
+- (void)dd_forwardTimeline:(UIButton *)sender {
+    __weak typeof(self) weakSelf = self;
+    NSString *username = self.m_item.username ?: @"未知用户";
+    NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", username];
+    float savedProgress = [[DDProgressCacheManager sharedInstance] getProgressForKey:cacheKey];
+    
+    // 创建进度窗口（转圈+百分比效果）
+    CGRect screenBounds = [UIScreen mainScreen].bounds;
+    DDProgressWindow *progressWindow = [[DDProgressWindow alloc] initWithFrame:screenBounds username:username];
+    [progressWindow updateProgress:savedProgress];
+    [progressWindow show];
+    
+    // 模拟转发过程（实际项目中应替换为真实转发逻辑）
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        float progress = savedProgress;
+        while (progress < 1.0) {
+            progress += 0.01;
+            if (progress > 1.0) progress = 1.0;
+            
+            [progressWindow updateProgress:progress];
+            
+            // 模拟网络延迟
+            [NSThread sleepForTimeInterval:0.05];
+        }
+        
+        // 转发完成
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [progressWindow hide];
+            [[DDProgressCacheManager sharedInstance] clearProgressForKey:cacheKey];
+            
+            // 进入转发界面
+            Class WCForwardViewControllerClass = objc_getClass("WCForwardViewController");
+            if (WCForwardViewControllerClass) {
+                WCForwardViewController *forwardVC = [[WCForwardViewControllerClass alloc] initWithDataItem:weakSelf.m_item];
+                if (weakSelf.navigationController) {
+                    [weakSelf.navigationController pushViewController:forwardVC animated:YES];
+                }
+            }
+        });
+    });
+}
+
+%end
+
+// 插件初始化
+%ctor {
+    @autoreleasepool {
+        [DDProgressCacheManager sharedInstance]; // 确保单例初始化
+        [DDTimelineForwardConfig setupDefaults];
+        
+        if (NSClassFromString(@"WCPluginsMgr")) {
+            [[objc_getClass("WCPluginsMgr") sharedInstance] 
+                registerControllerWithTitle:@"DD朋友圈转发" 
+                                   version:@"1.4.0" 
+                               controller:@"DDTimelineForwardSettingsController"];
+        }
+        
+        NSLog(@"DD朋友圈转发插件已加载 v1.4.0");
+    }
+}

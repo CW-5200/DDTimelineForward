@@ -273,13 +273,9 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 // 设置界面控制器
 @interface DDTimelineForwardSettingsController : UIViewController
 @property (nonatomic, strong) UISwitch *forwardSwitch;
-@property (nonatomic, strong) UISlider *spacingSlider;
-@property (nonatomic, strong) UILabel *spacingLabel;
 @end
 
-@implementation DDTimelineForwardSettingsController {
-    CGFloat _buttonSpacing;
-}
+@implementation DDTimelineForwardSettingsController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -293,12 +289,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
         sheet.prefersGrabberVisible = YES;
         sheet.preferredCornerRadius = 20.0;
-    }
-    
-    // 加载按钮间距设置
-    _buttonSpacing = [[NSUserDefaults standardUserDefaults] floatForKey:@"DDButtonSpacing"];
-    if (_buttonSpacing == 0) {
-        _buttonSpacing = 15.0; // 默认间距
     }
     
     [self setupUI];
@@ -338,50 +328,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     
     [mainStack addArrangedSubview:switchContainer];
     
-    // 按钮间距调整
-    UIView *spacingContainer = [[UIView alloc] init];
-    spacingContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    UILabel *spacingTitle = [[UILabel alloc] init];
-    spacingTitle.text = @"按钮间距调整";
-    spacingTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-    spacingTitle.textColor = [UIColor labelColor];
-    spacingTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    [spacingContainer addSubview:spacingTitle];
-    
-    self.spacingSlider = [[UISlider alloc] init];
-    self.spacingSlider.minimumValue = 5.0;
-    self.spacingSlider.maximumValue = 30.0;
-    self.spacingSlider.value = _buttonSpacing;
-    [self.spacingSlider addTarget:self action:@selector(spacingSliderChanged:) forControlEvents:UIControlEventValueChanged];
-    self.spacingSlider.translatesAutoresizingMaskIntoConstraints = NO;
-    [spacingContainer addSubview:self.spacingSlider];
-    
-    self.spacingLabel = [[UILabel alloc] init];
-    self.spacingLabel.text = [NSString stringWithFormat:@"间距: %.0f 点", _buttonSpacing];
-    self.spacingLabel.font = [UIFont systemFontOfSize:14];
-    self.spacingLabel.textColor = [UIColor secondaryLabelColor];
-    self.spacingLabel.textAlignment = NSTextAlignmentCenter;
-    self.spacingLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [spacingContainer addSubview:self.spacingLabel];
-    
-    [NSLayoutConstraint activateConstraints:@[
-        [spacingTitle.topAnchor constraintEqualToAnchor:spacingContainer.topAnchor],
-        [spacingTitle.leadingAnchor constraintEqualToAnchor:spacingContainer.leadingAnchor],
-        [spacingTitle.trailingAnchor constraintEqualToAnchor:spacingContainer.trailingAnchor],
-        
-        [self.spacingSlider.topAnchor constraintEqualToAnchor:spacingTitle.bottomAnchor constant:10],
-        [self.spacingSlider.leadingAnchor constraintEqualToAnchor:spacingContainer.leadingAnchor constant:20],
-        [self.spacingSlider.trailingAnchor constraintEqualToAnchor:spacingContainer.trailingAnchor constant:-20],
-        
-        [self.spacingLabel.topAnchor constraintEqualToAnchor:self.spacingSlider.bottomAnchor constant:10],
-        [self.spacingLabel.leadingAnchor constraintEqualToAnchor:spacingContainer.leadingAnchor],
-        [self.spacingLabel.trailingAnchor constraintEqualToAnchor:spacingContainer.trailingAnchor],
-        [self.spacingLabel.bottomAnchor constraintEqualToAnchor:spacingContainer.bottomAnchor]
-    ]];
-    
-    [mainStack addArrangedSubview:spacingContainer];
-    
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
     descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
@@ -404,8 +350,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         [mainStack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
         [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [switchContainer.heightAnchor constraintEqualToConstant:44],
-        [spacingContainer.heightAnchor constraintEqualToConstant:100]
+        [switchContainer.heightAnchor constraintEqualToConstant:44]
     ]];
 }
 
@@ -413,13 +358,93 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     [DDTimelineForwardConfig setTimelineForwardEnabled:sender.isOn];
 }
 
-- (void)spacingSliderChanged:(UISlider *)sender {
-    _buttonSpacing = sender.value;
-    self.spacingLabel.text = [NSString stringWithFormat:@"间距: %.0f 点", _buttonSpacing];
+@end
+
+// 自定义图标绘制类
+@interface DDForwardIconGenerator : NSObject
++ (UIImage *)generateForwardIconWithColor:(UIColor *)color size:(CGSize)size;
+@end
+
+@implementation DDForwardIconGenerator
+
++ (UIImage *)generateForwardIconWithColor:(UIColor *)color size:(CGSize)size {
+    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+    CGContextRef context = UIGraphicsGetCurrentContext();
     
-    // 保存设置
-    [[NSUserDefaults standardUserDefaults] setFloat:_buttonSpacing forKey:@"DDButtonSpacing"];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    // 设置图标颜色
+    [color setFill];
+    [color setStroke];
+    
+    // 绘制转发图标（类似微信的转发图标）
+    CGFloat lineWidth = 1.5;
+    CGContextSetLineWidth(context, lineWidth);
+    
+    // 计算图标绘制区域，留出边距
+    CGFloat margin = 2.0;
+    CGRect drawRect = CGRectMake(margin, margin, size.width - 2*margin, size.height - 2*margin);
+    
+    // 绘制一个向右的箭头和一个文档形状
+    CGFloat arrowWidth = drawRect.size.width * 0.4;
+    CGFloat arrowHeight = drawRect.size.height * 0.5;
+    CGFloat docWidth = drawRect.size.width * 0.4;
+    CGFloat docHeight = drawRect.size.height * 0.6;
+    
+    // 绘制文档形状（矩形）
+    CGRect docRect = CGRectMake(drawRect.origin.x, 
+                               drawRect.origin.y + (drawRect.size.height - docHeight)/2,
+                               docWidth, 
+                               docHeight);
+    
+    // 文档矩形（带圆角）
+    CGFloat cornerRadius = 1.5;
+    UIBezierPath *docPath = [UIBezierPath bezierPathWithRoundedRect:docRect cornerRadius:cornerRadius];
+    docPath.lineWidth = lineWidth;
+    [docPath stroke];
+    
+    // 在文档上添加两条短横线（模拟文档内容）
+    CGFloat lineSpacing = 3.0;
+    CGFloat lineY = docRect.origin.y + lineSpacing * 2;
+    
+    for (int i = 0; i < 3; i++) {
+        CGFloat lineX = docRect.origin.x + 3.0;
+        CGFloat lineLength = docRect.size.width - 6.0;
+        
+        UIBezierPath *linePath = [UIBezierPath bezierPath];
+        [linePath moveToPoint:CGPointMake(lineX, lineY)];
+        [linePath addLineToPoint:CGPointMake(lineX + lineLength, lineY)];
+        linePath.lineWidth = lineWidth;
+        [linePath stroke];
+        
+        lineY += lineSpacing;
+    }
+    
+    // 绘制箭头（从文档右侧延伸到边缘）
+    CGFloat arrowStartX = CGRectGetMaxX(docRect) + 3.0;
+    CGFloat arrowCenterY = CGRectGetMidY(docRect);
+    
+    UIBezierPath *arrowPath = [UIBezierPath bezierPath];
+    
+    // 箭头主体（向右的线）
+    [arrowPath moveToPoint:CGPointMake(arrowStartX, arrowCenterY)];
+    [arrowPath addLineToPoint:CGPointMake(drawRect.origin.x + drawRect.size.width - margin, arrowCenterY)];
+    
+    // 箭头头部（三角形）
+    CGFloat arrowHeadSize = 3.5;
+    [arrowPath moveToPoint:CGPointMake(drawRect.origin.x + drawRect.size.width - margin - arrowHeadSize, 
+                                      arrowCenterY - arrowHeadSize)];
+    [arrowPath addLineToPoint:CGPointMake(drawRect.origin.x + drawRect.size.width - margin, arrowCenterY)];
+    [arrowPath addLineToPoint:CGPointMake(drawRect.origin.x + drawRect.size.width - margin - arrowHeadSize, 
+                                      arrowCenterY + arrowHeadSize)];
+    
+    arrowPath.lineWidth = lineWidth;
+    arrowPath.lineCapStyle = kCGLineCapRound;
+    arrowPath.lineJoinStyle = kCGLineJoinRound;
+    [arrowPath stroke];
+    
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    
+    return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
 @end
@@ -435,32 +460,15 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         UIButton *commentBtn = self.m_commentBtn;
         
         CGFloat buttonWidth = [self buttonWidth:likeBtn];
-        CGFloat buttonSpacing = [[NSUserDefaults standardUserDefaults] floatForKey:@"DDButtonSpacing"];
-        if (buttonSpacing == 0) {
-            buttonSpacing = 15.0; // 默认间距
-        }
+        CGFloat buttonSpacing = 15.0; // 固定间距
         
-        // 创建转发按钮 - 添加微信风格图标
+        // 创建转发按钮
         UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
         forwardButton.frame = CGRectMake(0, 0, buttonWidth, likeBtn.frame.size.height);
         
-        // 使用系统图标作为微信转发图标
-        UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
-        if (forwardIcon) {
-            forwardIcon = [forwardIcon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-        } else {
-            // 如果找不到图标，创建一个简单的箭头
-            UIGraphicsBeginImageContextWithOptions(CGSizeMake(16, 16), NO, 0.0);
-            UIBezierPath *path = [UIBezierPath bezierPath];
-            [path moveToPoint:CGPointMake(4, 4)];
-            [path addLineToPoint:CGPointMake(12, 8)];
-            [path addLineToPoint:CGPointMake(4, 12)];
-            path.lineWidth = 2;
-            [[UIColor blackColor] setStroke];
-            [path stroke];
-            forwardIcon = UIGraphicsGetImageFromCurrentImageContext();
-            UIGraphicsEndImageContext();
-        }
+        // 创建自定义转发图标
+        UIImage *forwardIcon = [DDForwardIconGenerator generateForwardIconWithColor:likeBtn.currentTitleColor 
+                                                                               size:CGSizeMake(16, 16)];
         
         // 创建图标视图
         UIImageView *iconView = [[UIImageView alloc] initWithImage:forwardIcon];
@@ -469,10 +477,10 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         iconView.contentMode = UIViewContentModeScaleAspectFit;
         [forwardButton addSubview:iconView];
         
-        // 创建标题标签
+        // 创建标题标签 - 使用系统细体
         UILabel *titleLabel = [[UILabel alloc] init];
         titleLabel.text = @"转发";
-        titleLabel.font = likeBtn.titleLabel.font;
+        titleLabel.font = [UIFont systemFontOfSize:likeBtn.titleLabel.font.pointSize weight:UIFontWeightLight]; // 细体
         titleLabel.textColor = likeBtn.currentTitleColor;
         titleLabel.textAlignment = NSTextAlignmentLeft;
         titleLabel.frame = CGRectMake(30, 0, buttonWidth - 30, forwardButton.frame.size.height);
@@ -495,21 +503,21 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
             commentBtn.frame = CGRectMake(currentX, commentBtn.frame.origin.y, buttonWidth, commentBtn.frame.size.height);
             currentX += buttonWidth;
             
-            // 创建与微信系统一致的分隔线样式
+            // 创建自定义分隔线
             UIView *separator = [[UIView alloc] init];
             
-            // 使用系统分隔线颜色和尺寸
-            UIColor *separatorColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull traitCollection) {
+            // 根据系统主题设置分隔线颜色
+            separator.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull traitCollection) {
                 if (traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
-                    return [UIColor colorWithWhite:0.3 alpha:0.5];
+                    // 深色模式：浅白色，alpha 0.2
+                    return [UIColor colorWithWhite:0.9 alpha:0.2];
                 } else {
-                    return [UIColor colorWithWhite:0.7 alpha:0.6];
+                    // 浅色模式：黑色，alpha 0.1
+                    return [UIColor colorWithWhite:0.0 alpha:0.1];
                 }
             }];
             
-            separator.backgroundColor = separatorColor;
-            
-            // 设置分隔符位置和尺寸（与系统分隔线一致）
+            // 设置分隔符位置和尺寸
             CGFloat separatorHeight = forwardButton.frame.size.height * 0.6;
             CGFloat separatorY = (forwardButton.frame.size.height - separatorHeight) / 2;
             separator.frame = CGRectMake(currentX, separatorY, 0.5, separatorHeight);

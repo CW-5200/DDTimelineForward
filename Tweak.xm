@@ -130,13 +130,8 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 }
 
 - (void)setupBlurBackground {
-    // 创建毛玻璃效果
-    UIBlurEffect *blurEffect;
-    if (@available(iOS 13.0, *)) {
-        blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
-    } else {
-        blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
-    }
+    // 使用最新的系统毛玻璃效果
+    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
     
     _blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
     _blurView.frame = self.bounds;
@@ -189,11 +184,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     
     // 内容视图（带半透明背景）
     UIView *contentView = [[UIView alloc] init];
-    if (@available(iOS 13.0, *)) {
-        contentView.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.85];
-    } else {
-        contentView.backgroundColor = [[UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0] colorWithAlphaComponent:0.85];
-    }
+    contentView.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.85];
     contentView.layer.cornerRadius = 16.0;
     contentView.layer.borderWidth = 0.5;
     contentView.layer.borderColor = [UIColor separatorColor].CGColor;
@@ -297,13 +288,11 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     // 配置iOS 15+模态样式
-    if ([self respondsToSelector:@selector(sheetPresentationController)]) {
-        UISheetPresentationController *sheet = self.sheetPresentationController;
-        if (sheet) {
-            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
-            sheet.prefersGrabberVisible = YES;
-            sheet.preferredCornerRadius = 20.0;
-        }
+    UISheetPresentationController *sheet = self.sheetPresentationController;
+    if (sheet) {
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+        sheet.prefersGrabberVisible = YES;
+        sheet.preferredCornerRadius = 20.0;
     }
     
     // 加载按钮间距设置
@@ -451,107 +440,108 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
             buttonSpacing = 15.0; // 默认间距
         }
         
-        // 获取按钮容器
-        UIView *buttonContainer = likeBtn.superview;
-        
-        // 检查是否已经添加过转发按钮，避免重复添加
-        __block BOOL forwardButtonExists = NO;
-        [buttonContainer.subviews enumerateObjectsUsingBlock:^(UIView *subview, NSUInteger idx, BOOL *stop) {
-            if ([subview isKindOfClass:[UIButton class]] && [subview respondsToSelector:@selector(actionForTarget:forControlEvent:)]) {
-                UIButton *btn = (UIButton *)subview;
-                if (btn != likeBtn && btn != commentBtn) {
-                    forwardButtonExists = YES;
-                    *stop = YES;
-                }
-            }
-        }];
-        
-        if (forwardButtonExists) return;
-        
-        // 创建转发按钮 - 使用与系统按钮相同的样式
+        // 创建转发按钮 - 添加微信风格图标
         UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
         forwardButton.frame = CGRectMake(0, 0, buttonWidth, likeBtn.frame.size.height);
         
-        // 使用系统按钮的字体和颜色
-        UIColor *buttonColor = [likeBtn titleColorForState:UIControlStateNormal];
-        UIFont *buttonFont = likeBtn.titleLabel.font;
-        
-        // 创建转发图标
-        UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.forward"];
+        // 使用系统图标作为微信转发图标
+        UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
         if (forwardIcon) {
             forwardIcon = [forwardIcon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        } else {
+            // 如果找不到图标，创建一个简单的箭头
+            UIGraphicsBeginImageContextWithOptions(CGSizeMake(16, 16), NO, 0.0);
+            UIBezierPath *path = [UIBezierPath bezierPath];
+            [path moveToPoint:CGPointMake(4, 4)];
+            [path addLineToPoint:CGPointMake(12, 8)];
+            [path addLineToPoint:CGPointMake(4, 12)];
+            path.lineWidth = 2;
+            [[UIColor blackColor] setStroke];
+            [path stroke];
+            forwardIcon = UIGraphicsGetImageFromCurrentImageContext();
+            UIGraphicsEndImageContext();
         }
         
-        // 使用 UIButtonConfiguration (iOS 15+)
-        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-        config.image = forwardIcon;
-        config.title = @"转发";
-        config.imagePlacement = NSDirectionalRectEdgeLeading; // 图片在左侧
-        config.imagePadding = 6; // 图片和文字间距
-        config.baseForegroundColor = buttonColor;
+        // 创建图标视图
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:forwardIcon];
+        iconView.tintColor = likeBtn.currentTitleColor;
+        iconView.frame = CGRectMake(10, (forwardButton.frame.size.height - 16)/2, 16, 16);
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        [forwardButton addSubview:iconView];
         
-        // 设置字体
-        config.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *textAttributes) {
-            NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
-            newAttributes[NSFontAttributeName] = buttonFont;
-            return newAttributes;
-        };
+        // 创建标题标签
+        UILabel *titleLabel = [[UILabel alloc] init];
+        titleLabel.text = @"转发";
+        titleLabel.font = likeBtn.titleLabel.font;
+        titleLabel.textColor = likeBtn.currentTitleColor;
+        titleLabel.textAlignment = NSTextAlignmentLeft;
+        titleLabel.frame = CGRectMake(30, 0, buttonWidth - 30, forwardButton.frame.size.height);
+        [forwardButton addSubview:titleLabel];
         
-        forwardButton.configuration = config;
         [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
         
-        // 设置按钮位置
+        // 获取按钮容器
+        UIView *buttonContainer = likeBtn.superview;
+        
+        // 设置按钮位置（顺序：点赞 -> 评论 -> | -> 转发）
         CGFloat currentX = 0;
         
-        // 点赞按钮位置
+        // 点赞按钮位置（保持不变）
         likeBtn.frame = CGRectMake(currentX, likeBtn.frame.origin.y, buttonWidth, likeBtn.frame.size.height);
         currentX += buttonWidth + buttonSpacing;
         
-        // 评论按钮位置
+        // 评论按钮位置（在点赞按钮右侧）
         if (commentBtn) {
             commentBtn.frame = CGRectMake(currentX, commentBtn.frame.origin.y, buttonWidth, commentBtn.frame.size.height);
             currentX += buttonWidth;
             
-            // 添加系统风格的分割线
+            // 创建与微信系统一致的分隔线样式
             UIView *separator = [[UIView alloc] init];
-            separator.backgroundColor = [UIColor colorWithWhite:0.8 alpha:0.6];
-            separator.frame = CGRectMake(currentX, 
-                                       likeBtn.frame.size.height * 0.2,
-                                       1.0 / [UIScreen mainScreen].scale,
-                                       likeBtn.frame.size.height * 0.6);
-            separator.alpha = 0.6;
-            [buttonContainer addSubview:separator];
             
-            currentX += 1.0 / [UIScreen mainScreen].scale + buttonSpacing;
+            // 使用系统分隔线颜色和尺寸
+            UIColor *separatorColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull traitCollection) {
+                if (traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
+                    return [UIColor colorWithWhite:0.3 alpha:0.5];
+                } else {
+                    return [UIColor colorWithWhite:0.7 alpha:0.6];
+                }
+            }];
+            
+            separator.backgroundColor = separatorColor;
+            
+            // 设置分隔符位置和尺寸（与系统分隔线一致）
+            CGFloat separatorHeight = forwardButton.frame.size.height * 0.6;
+            CGFloat separatorY = (forwardButton.frame.size.height - separatorHeight) / 2;
+            separator.frame = CGRectMake(currentX, separatorY, 0.5, separatorHeight);
+            separator.layer.cornerRadius = 0.25; // 半圆角，宽度的一半
+            
+            [buttonContainer addSubview:separator];
+            currentX += 0.5 + buttonSpacing; // 分隔符宽度+间距
         } else {
+            // 如果没有评论按钮，直接添加间距
             currentX += buttonSpacing;
         }
         
-        // 转发按钮位置
+        // 转发按钮位置（在评论按钮右侧或点赞按钮右侧）
         forwardButton.frame = CGRectMake(currentX, likeBtn.frame.origin.y, buttonWidth, likeBtn.frame.size.height);
         currentX += buttonWidth;
         
         // 将转发按钮添加到容器
         [buttonContainer addSubview:forwardButton];
         
-        // 调整容器宽度
+        // 计算总宽度
+        CGFloat totalWidth = currentX;
+        
+        // 精确设置容器宽度（匹配按钮组总宽度）
         CGRect containerFrame = buttonContainer.frame;
-        containerFrame.size.width = currentX;
+        containerFrame.size.width = totalWidth;
         buttonContainer.frame = containerFrame;
         
-        // 调整浮窗位置和大小
+        // 精确设置浮窗宽度（匹配容器宽度）
         CGRect selfFrame = self.frame;
-        selfFrame.size.width = currentX;
-        
-        // 根据按钮数量调整浮窗位置
-        CGFloat offset = (selfFrame.size.width - containerFrame.size.width) / 2;
-        selfFrame.origin.x -= offset;
-        
+        selfFrame.size.width = totalWidth;
+        selfFrame.origin.x -= 90; // 整体向左移动
         self.frame = selfFrame;
-        
-        // 确保按钮容器在浮窗中居中
-        containerFrame.origin.x = (selfFrame.size.width - containerFrame.size.width) / 2;
-        buttonContainer.frame = containerFrame;
     }
 }
 
@@ -562,13 +552,13 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", username];
     float savedProgress = [[DDProgressCacheManager sharedInstance] getProgressForKey:cacheKey];
     
-    // 创建进度窗口
+    // 创建进度窗口（转圈+百分比效果）
     CGRect screenBounds = [UIScreen mainScreen].bounds;
     DDProgressWindow *progressWindow = [[DDProgressWindow alloc] initWithFrame:screenBounds username:username];
     [progressWindow updateProgress:savedProgress];
     [progressWindow show];
     
-    // 模拟转发过程
+    // 模拟转发过程（实际项目中应替换为真实转发逻辑）
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         float progress = savedProgress;
         while (progress < 1.0) {
@@ -576,13 +566,17 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
             if (progress > 1.0) progress = 1.0;
             
             [progressWindow updateProgress:progress];
+            
+            // 模拟网络延迟
             [NSThread sleepForTimeInterval:0.05];
         }
         
+        // 转发完成
         dispatch_async(dispatch_get_main_queue(), ^{
             [progressWindow hide];
             [[DDProgressCacheManager sharedInstance] clearProgressForKey:cacheKey];
             
+            // 进入转发界面
             Class WCForwardViewControllerClass = objc_getClass("WCForwardViewController");
             if (WCForwardViewControllerClass) {
                 WCForwardViewController *forwardVC = [[WCForwardViewControllerClass alloc] initWithDataItem:weakSelf.m_item];

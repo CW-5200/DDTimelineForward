@@ -10,6 +10,14 @@
 // 微信相关类声明
 @interface WCDataItem : NSObject
 @property(retain, nonatomic) NSString *username;
+- (id)getMediaWraps; // 获取媒体数组
+@end
+
+@interface WCMediaItem : NSObject
+@property(retain, nonatomic) NSString *mid;
+- (id)getMediaWrapUrl; // 获取媒体URL
+- (_Bool)hasData; // 是否有数据
+- (_Bool)hasPreview; // 是否有预览
 @end
 
 @interface WCOperateFloatView : UIView
@@ -24,12 +32,28 @@
 - (id)initWithDataItem:(WCDataItem *)arg1;
 @end
 
+@interface WCFacade : NSObject
++ (instancetype)sharedInstance;
+- (void)downloadMedia:(id)arg1 downloadType:(long long)arg2; // 下载媒体
+- (_Bool)IsMediaItemInDownloadQueue:(id)arg1; // 检查是否在下载队列
+@end
+
+// 微信媒体下载器
+@interface WCMediaDownloader : NSObject
+@property(readonly, nonatomic) WCMediaItem *mediaItem;
+@property(readonly, nonatomic) WCDataItem *dataItem;
+- (id)initWithDataItem:(id)arg1 mediaItem:(id)arg2;
+- (void)startDownloadWithCompletionHandler:(CDUnknownBlockType)arg1;
+- (_Bool)hasDownloaded;
+@end
+
 // 进度缓存管理器
 @interface DDProgressCacheManager : NSObject
 + (instancetype)sharedInstance;
 - (void)saveProgress:(float)progress forKey:(NSString *)key;
 - (float)getProgressForKey:(NSString *)key;
 - (void)clearProgressForKey:(NSString *)key;
+- (void)clearAllProgress;
 @end
 
 @implementation DDProgressCacheManager {
@@ -66,6 +90,10 @@
     [_progressCache removeObjectForKey:key];
 }
 
+- (void)clearAllProgress {
+    [_progressCache removeAllObjects];
+}
+
 @end
 
 // 插件配置类
@@ -99,26 +127,30 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 // 进度显示窗口（转圈+百分比效果）
 @interface DDProgressWindow : UIWindow
-- (instancetype)initWithFrame:(CGRect)frame username:(NSString *)username;
-- (void)updateProgress:(float)progress;
+- (instancetype)initWithFrame:(CGRect)frame title:(NSString *)title;
+- (void)updateProgress:(float)progress withStatus:(NSString *)status;
 - (void)show;
 - (void)hide;
+@property (nonatomic, copy) void (^onCancel)(void);
 @end
 
 @implementation DDProgressWindow {
     UIActivityIndicatorView *_activityIndicator;
     UILabel *_titleLabel;
     UILabel *_percentLabel;
-    UIButton *_cancelButton;
-    NSString *_username;
-    UIVisualEffectView *_blurView; // 毛玻璃效果视图
+    UILabel *_statusLabel;
+    UIView *_progressBar;
+    UIView *_progressBarFill;
+    NSString *_currentTitle;
+    UIVisualEffectView *_blurView;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame username:(NSString *)username {
+- (instancetype)initWithFrame:(CGRect)frame title:(NSString *)title {
     self = [super initWithFrame:frame];
     if (self) {
-        _username = username;
+        _currentTitle = title;
         self.windowLevel = UIWindowLevelAlert + 1;
+        self.backgroundColor = [UIColor clearColor];
         
         // 创建毛玻璃效果背景
         [self setupBlurBackground];
@@ -129,7 +161,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 }
 
 - (void)setupBlurBackground {
-    // 创建毛玻璃效果
     UIBlurEffect *blurEffect;
     if (@available(iOS 13.0, *)) {
         blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
@@ -140,9 +171,8 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     _blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
     _blurView.frame = self.bounds;
     _blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _blurView.alpha = 0.95; // 设置透明度
+    _blurView.alpha = 0.95;
     
-    // 添加半透明覆盖层增强效果
     UIView *overlayView = [[UIView alloc] initWithFrame:_blurView.bounds];
     overlayView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.2];
     overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -152,62 +182,75 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 }
 
 - (void)setupUI {
-    // 标题
-    _titleLabel = [[UILabel alloc] init];
-    _titleLabel.text = @"正在转发朋友圈";
-    _titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-    _titleLabel.textColor = [UIColor labelColor];
-    _titleLabel.textAlignment = NSTextAlignmentCenter;
-    _titleLabel.numberOfLines = 0;
-    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    // 活动指示器（转圈）- 使用大号样式
-    _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-    _activityIndicator.color = [UIColor labelColor];
-    _activityIndicator.translatesAutoresizingMaskIntoConstraints = NO;
-    [_activityIndicator startAnimating];
-    
-    // 百分比标签（增加"正在缓存"前缀）
-    _percentLabel = [[UILabel alloc] init];
-    _percentLabel.text = @"正在缓存0%";
-    _percentLabel.font = [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightMedium];
-    _percentLabel.textColor = [UIColor labelColor];
-    _percentLabel.textAlignment = NSTextAlignmentCenter;
-    _percentLabel.numberOfLines = 0;
-    _percentLabel.adjustsFontSizeToFitWidth = YES;
-    _percentLabel.minimumScaleFactor = 0.8;
-    _percentLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    // 取消按钮
-    _cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_cancelButton setTitle:@"取消" forState:UIControlStateNormal];
-    [_cancelButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
-    _cancelButton.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightRegular];
-    _cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [_cancelButton addTarget:self action:@selector(cancelButtonPressed) forControlEvents:UIControlEventTouchUpInside];
-    
-    // 内容视图（带半透明背景）
+    // 内容视图
     UIView *contentView = [[UIView alloc] init];
     if (@available(iOS 13.0, *)) {
-        contentView.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.85];
+        contentView.backgroundColor = [[UIColor tertiarySystemBackgroundColor] colorWithAlphaComponent:0.9];
     } else {
-        contentView.backgroundColor = [[UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0] colorWithAlphaComponent:0.85];
+        contentView.backgroundColor = [[UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0] colorWithAlphaComponent:0.9];
     }
     contentView.layer.cornerRadius = 16.0;
     contentView.layer.borderWidth = 0.5;
     contentView.layer.borderColor = [UIColor separatorColor].CGColor;
     contentView.translatesAutoresizingMaskIntoConstraints = NO;
     
+    // 标题
+    _titleLabel = [[UILabel alloc] init];
+    _titleLabel.text = _currentTitle;
+    _titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    _titleLabel.textColor = [UIColor labelColor];
+    _titleLabel.textAlignment = NSTextAlignmentCenter;
+    _titleLabel.numberOfLines = 0;
+    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    // 活动指示器
+    _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    _activityIndicator.color = [UIColor labelColor];
+    _activityIndicator.translatesAutoresizingMaskIntoConstraints = NO;
+    [_activityIndicator startAnimating];
+    
+    // 百分比标签
+    _percentLabel = [[UILabel alloc] init];
+    _percentLabel.text = @"0%";
+    _percentLabel.font = [UIFont monospacedDigitSystemFontOfSize:24 weight:UIFontWeightBold];
+    _percentLabel.textColor = [UIColor labelColor];
+    _percentLabel.textAlignment = NSTextAlignmentCenter;
+    _percentLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    // 状态标签
+    _statusLabel = [[UILabel alloc] init];
+    _statusLabel.text = @"准备下载...";
+    _statusLabel.font = [UIFont systemFontOfSize:14];
+    _statusLabel.textColor = [UIColor secondaryLabelColor];
+    _statusLabel.textAlignment = NSTextAlignmentCenter;
+    _statusLabel.numberOfLines = 0;
+    _statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    // 进度条背景
+    _progressBar = [[UIView alloc] init];
+    _progressBar.backgroundColor = [UIColor systemGray5Color];
+    _progressBar.layer.cornerRadius = 4;
+    _progressBar.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    // 进度条填充
+    _progressBarFill = [[UIView alloc] init];
+    _progressBarFill.backgroundColor = [UIColor systemBlueColor];
+    _progressBarFill.layer.cornerRadius = 4;
+    _progressBarFill.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    [_progressBar addSubview:_progressBarFill];
+    
     [contentView addSubview:_titleLabel];
     [contentView addSubview:_activityIndicator];
     [contentView addSubview:_percentLabel];
-    [contentView addSubview:_cancelButton];
+    [contentView addSubview:_statusLabel];
+    [contentView addSubview:_progressBar];
     
     [self addSubview:contentView];
     
     // 布局约束
     [NSLayoutConstraint activateConstraints:@[
-        // 内容视图（居中显示）
+        // 内容视图
         [contentView.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
         [contentView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
         [contentView.widthAnchor constraintEqualToConstant:280],
@@ -217,49 +260,52 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         [_titleLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:25],
         [_titleLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [_titleLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [_titleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:25],
         
-        // 活动指示器（转圈）
+        // 活动指示器
         [_activityIndicator.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:20],
         [_activityIndicator.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
-        [_activityIndicator.widthAnchor constraintEqualToConstant:50],
-        [_activityIndicator.heightAnchor constraintEqualToConstant:50],
         
         // 百分比标签
-        [_percentLabel.topAnchor constraintEqualToAnchor:_activityIndicator.bottomAnchor constant:20],
-        [_percentLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
-        [_percentLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [_percentLabel.heightAnchor constraintGreaterThanOrEqualToConstant:30],
+        [_percentLabel.topAnchor constraintEqualToAnchor:_activityIndicator.bottomAnchor constant:10],
+        [_percentLabel.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
         
-        // 取消按钮
-        [_cancelButton.topAnchor constraintEqualToAnchor:_percentLabel.bottomAnchor constant:50],
-        [_cancelButton.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
-        [_cancelButton.bottomAnchor constraintLessThanOrEqualToAnchor:contentView.bottomAnchor constant:-20]
+        // 状态标签
+        [_statusLabel.topAnchor constraintEqualToAnchor:_percentLabel.bottomAnchor constant:10],
+        [_statusLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [_statusLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        
+        // 进度条
+        [_progressBar.topAnchor constraintEqualToAnchor:_statusLabel.bottomAnchor constant:20],
+        [_progressBar.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [_progressBar.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        [_progressBar.heightAnchor constraintEqualToConstant:8],
+        [_progressBar.bottomAnchor constraintLessThanOrEqualToAnchor:contentView.bottomAnchor constant:-25],
+        
+        // 进度条填充
+        [_progressBarFill.leadingAnchor constraintEqualToAnchor:_progressBar.leadingAnchor],
+        [_progressBarFill.topAnchor constraintEqualToAnchor:_progressBar.topAnchor],
+        [_progressBarFill.bottomAnchor constraintEqualToAnchor:_progressBar.bottomAnchor],
+        [_progressBarFill.widthAnchor constraintEqualToConstant:0]
     ]];
 }
 
-- (void)updateProgress:(float)progress {
+- (void)updateProgress:(float)progress withStatus:(NSString *)status {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // 更新百分比标签（增加"正在缓存"前缀）
         int percent = (int)(progress * 100);
-        _percentLabel.text = [NSString stringWithFormat:@"正在缓存%d%%", percent];
+        _percentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
+        _statusLabel.text = status;
         
-        // 保存进度到缓存
-        NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", _username];
-        [[DDProgressCacheManager sharedInstance] saveProgress:progress forKey:cacheKey];
+        // 更新进度条宽度
+        CGFloat barWidth = _progressBar.frame.size.width * progress;
+        _progressBarFill.frame = CGRectMake(0, 0, barWidth, _progressBar.frame.size.height);
         
-        // 完成时改变颜色和文本
+        // 颜色变化
         if (progress >= 1.0) {
-            _percentLabel.text = @"缓存完成!";
             _percentLabel.textColor = [UIColor systemGreenColor];
+            _progressBarFill.backgroundColor = [UIColor systemGreenColor];
+            [_activityIndicator stopAnimating];
         }
     });
-}
-
-- (void)cancelButtonPressed {
-    [self hide];
-    NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", _username];
-    [[DDProgressCacheManager sharedInstance] clearProgressForKey:cacheKey];
 }
 
 - (void)show {
@@ -269,7 +315,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 - (void)hide {
     self.hidden = YES;
-    _activityIndicator.hidden = YES;
     [_activityIndicator stopAnimating];
     
     UIWindow *mainWindow = [[[UIApplication sharedApplication] delegate] window];
@@ -291,7 +336,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     self.title = @"朋友圈转发设置";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
-    // 配置iOS 15+模态样式
     if ([self respondsToSelector:@selector(sheetPresentationController)]) {
         UISheetPresentationController *sheet = self.sheetPresentationController;
         if (sheet) {
@@ -340,7 +384,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
-    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
+    descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容（包含媒体文件下载）";
     descriptionLabel.font = [UIFont systemFontOfSize:14];
     descriptionLabel.textColor = [UIColor secondaryLabelColor];
     descriptionLabel.numberOfLines = 0;
@@ -349,7 +393,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     
     // 版本信息
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"DD朋友圈转发 v1.4.0";
+    versionLabel.text = @"DD朋友圈转发 v1.5.0";
     versionLabel.font = [UIFont systemFontOfSize:12];
     versionLabel.textColor = [UIColor tertiaryLabelColor];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -370,7 +414,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 
 @end
 
-// Hook实现
+// Hook实现 - 修复媒体下载问题
 %hook WCOperateFloatView
 
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
@@ -409,41 +453,122 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
     __weak typeof(self) weakSelf = self;
-    NSString *username = self.m_item.username ?: @"未知用户";
-    NSString *cacheKey = [NSString stringWithFormat:@"forward_progress_%@", username];
-    float savedProgress = [[DDProgressCacheManager sharedInstance] getProgressForKey:cacheKey];
+    WCDataItem *dataItem = self.m_item;
+    NSString *username = dataItem.username ?: @"未知用户";
     
-    // 创建进度窗口（转圈+百分比效果）
+    // 获取媒体数组
+    NSArray *mediaItems = nil;
+    if ([dataItem respondsToSelector:@selector(getMediaWraps)]) {
+        mediaItems = [dataItem getMediaWraps];
+    }
+    
+    // 创建进度窗口
     CGRect screenBounds = [UIScreen mainScreen].bounds;
-    DDProgressWindow *progressWindow = [[DDProgressWindow alloc] initWithFrame:screenBounds username:username];
-    [progressWindow updateProgress:savedProgress];
+    DDProgressWindow *progressWindow = [[DDProgressWindow alloc] initWithFrame:screenBounds title:@"正在下载媒体文件"];
     [progressWindow show];
     
-    // 模拟转发过程（实际项目中应替换为真实转发逻辑）
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        float progress = savedProgress;
-        while (progress < 1.0) {
-            progress += 0.01;
-            if (progress > 1.0) progress = 1.0;
+    // 如果没有媒体文件，直接跳转
+    if (!mediaItems || mediaItems.count == 0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [progressWindow hide];
+            [weakSelf showForwardViewControllerWithDataItem:dataItem];
+        });
+        return;
+    }
+    
+    // 使用WCMediaDownloader下载媒体文件
+    __block NSUInteger completedCount = 0;
+    __block NSUInteger totalCount = mediaItems.count;
+    __block NSMutableArray *downloaders = [NSMutableArray array];
+    
+    for (WCMediaItem *mediaItem in mediaItems) {
+        // 检查是否已经下载
+        if ([mediaItem hasData] || [mediaItem hasPreview]) {
+            completedCount++;
+            [progressWindow updateProgress:(float)completedCount/totalCount 
+                               withStatus:[NSString stringWithFormat:@"跳过已下载文件 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
             
-            [progressWindow updateProgress:progress];
-            
-            // 模拟网络延迟
-            [NSThread sleepForTimeInterval:0.05];
+            if (completedCount == totalCount) {
+                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+            }
+            continue;
         }
         
-        // 转发完成
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [progressWindow hide];
-            [[DDProgressCacheManager sharedInstance] clearProgressForKey:cacheKey];
+        // 检查是否已经在下载队列中
+        WCFacade *facade = [objc_getClass("WCFacade") sharedInstance];
+        if ([facade IsMediaItemInDownloadQueue:mediaItem]) {
+            completedCount++;
+            [progressWindow updateProgress:(float)completedCount/totalCount 
+                               withStatus:[NSString stringWithFormat:@"已在下载队列 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
             
-            // 进入转发界面
-            WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:weakSelf.m_item];
-            if (weakSelf.navigationController) {
-                [weakSelf.navigationController pushViewController:forwardVC animated:YES];
+            if (completedCount == totalCount) {
+                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
             }
-        });
+            continue;
+        }
+        
+        // 创建下载器
+        WCMediaDownloader *downloader = [[objc_getClass("WCMediaDownloader") alloc] initWithDataItem:dataItem mediaItem:mediaItem];
+        if (downloader) {
+            [downloaders addObject:downloader];
+            
+            // 开始下载
+            [downloader startDownloadWithCompletionHandler:^(NSError *error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    completedCount++;
+                    
+                    if (error) {
+                        [progressWindow updateProgress:(float)completedCount/totalCount 
+                                           withStatus:[NSString stringWithFormat:@"下载失败 (%lu/%lu): %@", 
+                                                      (unsigned long)completedCount, (unsigned long)totalCount, error.localizedDescription]];
+                    } else {
+                        [progressWindow updateProgress:(float)completedCount/totalCount 
+                                           withStatus:[NSString stringWithFormat:@"下载完成 (%lu/%lu)", 
+                                                      (unsigned long)completedCount, (unsigned long)totalCount]];
+                    }
+                    
+                    // 所有下载完成
+                    if (completedCount == totalCount) {
+                        [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+                    }
+                });
+            }];
+        } else {
+            // 无法创建下载器，视为完成
+            completedCount++;
+            [progressWindow updateProgress:(float)completedCount/totalCount 
+                               withStatus:[NSString stringWithFormat:@"跳过无法下载的文件 (%lu/%lu)", (unsigned long)completedCount, (unsigned long)totalCount]];
+            
+            if (completedCount == totalCount) {
+                [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+            }
+        }
+    }
+    
+    // 如果所有文件都已跳过（已下载或在队列中）
+    if (completedCount == totalCount && downloaders.count == 0) {
+        [self allDownloadsCompletedWithProgressWindow:progressWindow dataItem:dataItem];
+    }
+}
+
+%new
+- (void)allDownloadsCompletedWithProgressWindow:(DDProgressWindow *)progressWindow dataItem:(WCDataItem *)dataItem {
+    __weak typeof(self) weakSelf = self;
+    
+    // 延迟关闭进度窗口并跳转
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [progressWindow hide];
+        [weakSelf showForwardViewControllerWithDataItem:dataItem];
     });
+}
+
+%new
+- (void)showForwardViewControllerWithDataItem:(WCDataItem *)dataItem {
+    // 进入转发界面
+    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:dataItem];
+    if (self.navigationController) {
+        [self.navigationController pushViewController:forwardVC animated:YES];
+    }
 }
 
 %end
@@ -451,16 +576,16 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 // 插件初始化
 %ctor {
     @autoreleasepool {
-        [DDProgressCacheManager sharedInstance]; // 确保单例初始化
+        [DDProgressCacheManager sharedInstance];
         [DDTimelineForwardConfig setupDefaults];
         
         if (NSClassFromString(@"WCPluginsMgr")) {
             [[objc_getClass("WCPluginsMgr") sharedInstance] 
                 registerControllerWithTitle:@"DD朋友圈转发" 
-                                   version:@"1.4.0" 
+                                   version:@"1.5.0" 
                                controller:@"DDTimelineForwardSettingsController"];
         }
         
-        NSLog(@"DD朋友圈转发插件已加载 v1.4.0");
+        NSLog(@"DD朋友圈转发插件已加载 v1.5.0");
     }
 }

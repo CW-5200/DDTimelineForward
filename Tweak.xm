@@ -384,8 +384,6 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     CGRect drawRect = CGRectMake(margin, margin, size.width - 2*margin, size.height - 2*margin);
     
     // 绘制一个向右的箭头和一个文档形状
-    CGFloat arrowWidth = drawRect.size.width * 0.4;
-    CGFloat arrowHeight = drawRect.size.height * 0.5;
     CGFloat docWidth = drawRect.size.width * 0.4;
     CGFloat docHeight = drawRect.size.height * 0.6;
     

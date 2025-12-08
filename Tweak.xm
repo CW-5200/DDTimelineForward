@@ -293,11 +293,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
         return;
     }
     
-    // 创建下载器
-    // 注意：这里需要根据实际情况调用微信的下载方法
-    // 由于我们不能直接调用微信的私有API，这里采用hook的方式
-    // 实际实现会在hook部分处理
-    
     // 存储下载任务
     self.downloadTasks[mediaItem.mid ?: @"unknown"] = @{
         @"taskId": taskId,
@@ -310,30 +305,25 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
 }
 
 - (void)triggerMediaDownload:(WCMediaItem *)mediaItem {
-    // 这里触发微信原生的下载机制
-    // 通过hook微信的下载方法来捕获下载完成事件
-    
     if (!mediaItem) return;
     
     // 检查媒体类型
     if (mediaItem.type == 1) { // 图片
-        // 调用图片下载
         if ([DDTimelineForwardConfig showDownloadProgress]) {
             NSLog(@"[DDTimelineForward] 开始下载图片: %@", mediaItem.title ?: mediaItem.mid);
         }
         
-        // 模拟下载完成（实际实现会通过hook捕获）
+        // 模拟下载完成
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self handleMediaDownloadComplete:mediaItem success:YES];
         });
         
     } else if (mediaItem.type == 2) { // 视频
-        // 调用视频下载
         if ([DDTimelineForwardConfig showDownloadProgress]) {
             NSLog(@"[DDTimelineForward] 开始下载视频: %@", mediaItem.title ?: mediaItem.mid);
         }
         
-        // 模拟下载完成（实际实现会通过hook捕获）
+        // 模拟下载完成
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self handleMediaDownloadComplete:mediaItem success:YES];
         });
@@ -366,7 +356,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     }
     
     // 检查本地文件是否存在
-    // 这里需要根据媒体类型检查不同的路径
     if (mediaItem.type == 1) { // 图片
         NSString *path = [mediaItem pathForData];
         if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
@@ -397,7 +386,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
 }
 
 - (void)notifyProgressForTask:(NSString *)taskId current:(NSInteger)current total:(NSInteger)total {
-    // 发送进度通知
     NSDictionary *userInfo = @{
         @"taskId": taskId ?: @"",
         @"current": @(current),
@@ -440,7 +428,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     self.layer.cornerRadius = 10;
     self.layer.masksToBounds = YES;
     
-    // 标题标签
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.text = @"正在准备媒体...";
     _titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
@@ -448,13 +435,11 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     _titleLabel.textAlignment = NSTextAlignmentCenter;
     [self addSubview:_titleLabel];
     
-    // 进度条
     _progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
     _progressView.progressTintColor = [UIColor systemBlueColor];
     _progressView.trackTintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.3];
     [self addSubview:_progressView];
     
-    // 进度标签
     _progressLabel = [[UILabel alloc] init];
     _progressLabel.font = [UIFont systemFontOfSize:14];
     _progressLabel.textColor = [UIColor whiteColor];
@@ -462,7 +447,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     _progressLabel.text = @"0/0";
     [self addSubview:_progressLabel];
     
-    // 取消按钮
     _cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_cancelButton setTitle:@"取消" forState:UIControlStateNormal];
     [_cancelButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
@@ -565,7 +549,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     self.title = @"朋友圈转发设置";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
-    // 配置iOS 15+模态样式
     UISheetPresentationController *sheet = self.sheetPresentationController;
     if (sheet) {
         sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
@@ -590,7 +573,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
         [_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
     
-    // 设置项
     _settings = @[
         @{
             @"title": @"启用朋友圈转发",
@@ -732,7 +714,7 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
     if (section == 0) {
         return @"启用朋友圈转发功能，可在朋友圈菜单中添加转发按钮";
     }
-    return @"v1.0.0 © DD Plugin";
+    return @"v1.0.0 © DD Plugin (iOS 15.0+)";
 }
 
 #pragma mark - Actions
@@ -746,7 +728,6 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
         if (indexPath.section == 0) {
             setting = _settings[indexPath.row];
         } else {
-            // 不应该在这里
             return;
         }
         
@@ -785,58 +766,65 @@ static NSString *const kMaxCacheSizeKey = @"DDMaxCacheSizeMB";
 
 @end
 
-// 辅助函数：获取主窗口
+// 辅助函数：获取主窗口（iOS 15.0+）
 static UIWindow *DDGetKeyWindow(void) {
     UIWindow *keyWindow = nil;
     
-    if (@available(iOS 13.0, *)) {
-        for (UIWindowScene *windowScene in [UIApplication sharedApplication].connectedScenes) {
-            if (windowScene.activationState == UISceneActivationStateForegroundActive) {
-                for (UIWindow *window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
+    // iOS 13.0+ 使用场景API
+    for (UIWindowScene *windowScene in [UIApplication sharedApplication].connectedScenes) {
+        if (windowScene.activationState == UISceneActivationStateForegroundActive) {
+            for (UIWindow *window in windowScene.windows) {
+                if (window.isKeyWindow) {
+                    keyWindow = window;
+                    break;
                 }
-                if (keyWindow) break;
             }
+            if (keyWindow) break;
         }
-    } else {
-        keyWindow = [UIApplication sharedApplication].keyWindow;
     }
     
-    // 如果仍然没有找到，使用第一个窗口
-    if (!keyWindow && [UIApplication sharedApplication].windows.count > 0) {
-        keyWindow = [UIApplication sharedApplication].windows.firstObject;
+    // 回退方案，获取第一个窗口
+    if (!keyWindow) {
+        for (UIWindowScene *windowScene in [UIApplication sharedApplication].connectedScenes) {
+            if (windowScene.activationState == UISceneActivationStateForegroundActive) {
+                NSArray<UIWindow *> *windows = windowScene.windows;
+                if (windows.count > 0) {
+                    keyWindow = windows.firstObject;
+                    break;
+                }
+            }
+        }
     }
     
     return keyWindow;
 }
 
+// 定义WCOperateFloatView的私有方法
+@interface WCOperateFloatView (DDTimelineForward)
+- (void)dd_forwardTimeline:(UIButton *)sender;
+- (void)dd_prepareMediaAndForward;
+- (void)dd_forwardToTimeline;
+- (void)dd_showDownloadFailedAlert:(NSArray *)failedMedia;
+- (UIViewController *)dd_topViewController;
+@end
+
 // Hook实现
 %hook WCOperateFloatView
 
-// 新增方法：转发朋友圈
-%new
 - (void)dd_forwardTimeline:(UIButton *)sender {
     if (!self.m_item) {
         NSLog(@"[DDTimelineForward] 无法获取朋友圈数据");
         return;
     }
     
-    // 检查是否需要自动下载媒体
     if ([DDTimelineForwardConfig autoDownloadMedia]) {
         [self dd_prepareMediaAndForward];
     } else {
-        // 直接转发
         [self dd_forwardToTimeline];
     }
 }
 
-// 新增方法：准备媒体并转发
-%new
 - (void)dd_prepareMediaAndForward {
-    // 显示下载进度
     DDDownloadProgressView *progressView = nil;
     if ([DDTimelineForwardConfig showDownloadProgress]) {
         UIView *superview = self.navigationController.view ?: DDGetKeyWindow();
@@ -852,22 +840,18 @@ static UIWindow *DDGetKeyWindow(void) {
         [progressView showInView:superview];
     }
     
-    // 开始缓存媒体
     [[DDMediaCacheManager sharedManager] cacheMediaForDataItem:self.m_item completion:^(BOOL allCached, NSArray *failedMedia) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [progressView dismiss];
             
             if (!allCached && failedMedia.count > 0) {
-                // 有媒体下载失败
                 [self dd_showDownloadFailedAlert:failedMedia];
             } else {
-                // 所有媒体已缓存，开始转发
                 [self dd_forwardToTimeline];
             }
         });
     }];
     
-    // 监听进度更新
     if (progressView) {
         [[NSNotificationCenter defaultCenter] addObserverForName:@"DDTimelineDownloadProgress"
                                                           object:nil
@@ -883,14 +867,11 @@ static UIWindow *DDGetKeyWindow(void) {
     }
 }
 
-// 新增方法：直接转发到朋友圈
-%new
 - (void)dd_forwardToTimeline {
     WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
     if (self.navigationController) {
         [self.navigationController pushViewController:forwardVC animated:YES];
     } else {
-        // 尝试获取当前显示的控制器
         UIViewController *topVC = [self dd_topViewController];
         if (topVC) {
             [topVC presentViewController:forwardVC animated:YES completion:nil];
@@ -898,8 +879,6 @@ static UIWindow *DDGetKeyWindow(void) {
     }
 }
 
-// 新增方法：显示下载失败提示
-%new
 - (void)dd_showDownloadFailedAlert:(NSArray *)failedMedia {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"媒体下载失败"
                                                                    message:[NSString stringWithFormat:@"有 %@ 个媒体文件下载失败，是否继续转发？", @(failedMedia.count)]
@@ -914,8 +893,6 @@ static UIWindow *DDGetKeyWindow(void) {
     [presentingVC presentViewController:alert animated:YES completion:nil];
 }
 
-// 新增方法：获取顶层视图控制器
-%new
 - (UIViewController *)dd_topViewController {
     UIWindow *window = DDGetKeyWindow();
     UIViewController *rootVC = window.rootViewController;
@@ -957,7 +934,6 @@ static UIWindow *DDGetKeyWindow(void) {
         
         [self addSubview:forwardButton];
         
-        // 调整容器宽度
         CGRect containerFrame = self.m_likeBtn.superview.frame;
         containerFrame.size.width += buttonWidth;
         self.m_likeBtn.superview.frame = containerFrame;
@@ -970,11 +946,10 @@ static UIWindow *DDGetKeyWindow(void) {
 
 %end
 
-// Hook微信的下载相关方法，以便更好地控制下载过程
+// Hook微信的下载相关方法
 %hook WCFacade
 
 - (void)downloadMedia:(WCMediaItem *)arg0 downloadType:(long long)arg1 {
-    // 记录下载开始
     NSLog(@"[DDTimelineForward] 开始下载媒体: %@", arg0.mid);
     %orig(arg0, arg1);
 }
@@ -982,7 +957,6 @@ static UIWindow *DDGetKeyWindow(void) {
 - (void)onDownloadFinish:(id)arg0 downloadType:(long long)arg1 {
     %orig(arg0, arg1);
     
-    // 通知缓存管理器下载完成
     if ([arg0 isKindOfClass:objc_getClass("WCMediaItem")]) {
         [[DDMediaCacheManager sharedManager] handleMediaDownloadComplete:arg0 success:YES];
     }
@@ -991,7 +965,6 @@ static UIWindow *DDGetKeyWindow(void) {
 - (void)onDownloadFail:(id)arg0 downloadType:(long long)arg1 {
     %orig(arg0, arg1);
     
-    // 通知缓存管理器下载失败
     if ([arg0 isKindOfClass:objc_getClass("WCMediaItem")]) {
         [[DDMediaCacheManager sharedManager] handleMediaDownloadComplete:arg0 success:NO];
     }
@@ -1003,18 +976,14 @@ static UIWindow *DDGetKeyWindow(void) {
 %hook WCMediaDownloader
 
 - (void)startDownloadWithCompletionHandler:(void (^)(BOOL))handler {
-    // 保存原始完成处理器
     __block void (^originalHandler)(BOOL) = [handler copy];
     
-    // 创建新的完成处理器
     void (^newHandler)(BOOL) = ^(BOOL success) {
-        // 通知缓存管理器
         WCMediaItem *mediaItem = [self mediaItem];
         if (mediaItem) {
             [[DDMediaCacheManager sharedManager] handleMediaDownloadComplete:mediaItem success:success];
         }
         
-        // 调用原始处理器
         if (originalHandler) {
             originalHandler(success);
         }
@@ -1033,12 +1002,10 @@ static UIWindow *DDGetKeyWindow(void) {
         if (NSClassFromString(@"WCPluginsMgr")) {
             [[objc_getClass("WCPluginsMgr") sharedInstance] 
                 registerControllerWithTitle:@"DD朋友圈转发" 
-                                   version:@"1.0.0" 
+                                   version:@"1.0.0 (iOS 15.0+)" 
                                controller:@"DDTimelineForwardSettingsController"];
         }
         
-        NSLog(@"[DDTimelineForward] 插件已加载 - 版本 1.0.0");
-        NSLog(@"[DDTimelineForward] 自动下载媒体: %@", [DDTimelineForwardConfig autoDownloadMedia] ? @"开启" : @"关闭");
-        NSLog(@"[DDTimelineForward] 显示下载进度: %@", [DDTimelineForwardConfig showDownloadProgress] ? @"开启" : @"关闭");
+        NSLog(@"[DDTimelineForward] 插件已加载 - 版本 1.0.0 (iOS 15.0+)");
     }
 }

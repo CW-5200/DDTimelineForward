@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 // 插件管理器接口
 @interface WCPluginsMgr : NSObject
@@ -38,7 +39,7 @@
 @property (retain, nonatomic) NSMutableArray *previewUrls;
 @property (retain, nonatomic) id dataUrl;
 @property (retain, nonatomic) id lowBandUrl;
-@property (nonatomic) struct CGSize { double width; double height; } imgSize;
+@property (nonatomic) CGSize imgSize; // 使用系统定义的CGSize
 @property (nonatomic) double videoDuration;
 @property (readonly, nonatomic) BOOL hasData;
 @property (readonly, nonatomic) BOOL hasSight;
@@ -415,7 +416,9 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
         loadingView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
         loadingView.tag = 10087;
         
-        UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+        // 使用现代的UIActivityIndicatorViewStyleLarge
+        UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+        indicator.color = [UIColor whiteColor];
         indicator.center = loadingView.center;
         [indicator startAnimating];
         [loadingView addSubview:indicator];
@@ -434,7 +437,7 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
             
             if (success) {
                 // 缓存成功，打开转发界面
-                [self openForwardViewController];
+                [self dd_openForwardViewController];
             } else {
                 // 缓存失败，显示提示
                 UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"缓存失败" 
@@ -442,7 +445,7 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
                     preferredStyle:UIAlertControllerStyleAlert];
                 [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
                 [alert addAction:[UIAlertAction actionWithTitle:@"继续转发" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                    [self openForwardViewController];
+                    [self dd_openForwardViewController];
                 }]];
                 
                 if (self.navigationController) {
@@ -452,12 +455,12 @@ static NSString *const kAutoCacheEnabledKey = @"DDAutoCacheEnabled";
         }];
     } else {
         // 直接打开转发界面
-        [self openForwardViewController];
+        [self dd_openForwardViewController];
     }
 }
 
 %new
-- (void)openForwardViewController {
+- (void)dd_openForwardViewController {
     WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
     if (self.navigationController) {
         [self.navigationController pushViewController:forwardVC animated:YES];

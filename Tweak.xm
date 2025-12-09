@@ -14,7 +14,7 @@
 
 @interface WCOperateFloatView : UIView
 @property(readonly, nonatomic) UIButton *m_likeBtn;
-@property(readonly, nonatomic) UIButton *m_commentBtn; // 添加评论按钮属性
+@property(readonly, nonatomic) UIButton *m_commentBtn;
 @property(readonly, nonatomic) WCDataItem *m_item;
 @property(nonatomic) __weak UINavigationController *navigationController;
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2;
@@ -147,84 +147,104 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
 - (void)showWithItemData:(id)arg1 tipPoint:(struct CGPoint)arg2 {
     %orig(arg1, arg2);
     
-    // 检查是否已启用转发功能
     if (![DDTimelineForwardConfig isTimelineForwardEnabled]) {
         return;
     }
     
-    // 检查是否已存在转发按钮（避免重复添加）
-    static NSInteger forwardButtonTag = 1001;
-    UIButton *existingForwardButton = [self viewWithTag:forwardButtonTag];
-    if (existingForwardButton) {
+    // 获取点赞按钮的宽度作为标准宽度
+    UIButton *likeButton = self.m_likeBtn;
+    CGFloat buttonWidth = CGRectGetWidth(likeButton.frame);
+    
+    // 获取按钮容器（猜测是m_clipView）
+    UIView *clipView = nil;
+    for (UIView *subview in self.subviews) {
+        if ([subview.subviews containsObject:likeButton] && subview != likeButton) {
+            clipView = subview;
+            break;
+        }
+    }
+    
+    if (!clipView) {
+        clipView = likeButton.superview;
+    }
+    
+    if (!clipView) {
         return;
     }
     
-    // 获取点赞按钮和评论按钮的frame
-    CGRect likeBtnFrame = self.m_likeBtn.frame;
-    CGRect commentBtnFrame = self.m_commentBtn.frame;
-    
-    // 计算转发按钮宽度（与点赞按钮相同）
-    CGFloat buttonWidth = [self buttonWidth:self.m_likeBtn];
-    
-    // 获取按钮容器（假设点赞和评论按钮在同一个容器中）
-    UIView *buttonsContainer = self.m_likeBtn.superview;
-    if (!buttonsContainer) {
-        buttonsContainer = self;
-    }
-    
-    // 计算按钮之间的间距
-    CGFloat spacing = 0;
-    if (CGRectGetMaxX(likeBtnFrame) <= CGRectGetMinX(commentBtnFrame)) {
-        spacing = CGRectGetMinX(commentBtnFrame) - CGRectGetMaxX(likeBtnFrame);
-    } else {
-        // 如果按钮重叠或没有间距，使用默认间距
-        spacing = 8.0; // 默认间距
-    }
+    // 获取评论按钮
+    UIButton *commentButton = self.m_commentBtn;
     
     // 创建转发按钮
     UIButton *forwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    forwardButton.tag = forwardButtonTag;
     [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
-    [forwardButton setTitleColor:self.m_likeBtn.currentTitleColor forState:UIControlStateNormal];
-    forwardButton.titleLabel.font = self.m_likeBtn.titleLabel.font;
+    [forwardButton setTitleColor:likeButton.currentTitleColor forState:UIControlStateNormal];
+    forwardButton.titleLabel.font = likeButton.titleLabel.font;
     [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];
     
-    // 设置转发按钮frame
-    CGFloat forwardButtonX = CGRectGetMaxX(commentBtnFrame) + spacing;
-    forwardButton.frame = CGRectMake(
-        forwardButtonX,
-        likeBtnFrame.origin.y,
-        buttonWidth,
-        likeBtnFrame.size.height
-    );
+    // 设置按钮框架
+    CGFloat buttonHeight = CGRectGetHeight(likeButton.frame);
+    CGFloat spacing = 0;
     
-    // 添加转发按钮到容器
-    [buttonsContainer addSubview:forwardButton];
-    
-    // 调整容器宽度以容纳转发按钮
-    CGRect containerFrame = buttonsContainer.frame;
-    CGFloat oldContainerWidth = containerFrame.size.width;
-    CGFloat newContainerWidth = CGRectGetMaxX(forwardButton.frame);
-    
-    if (newContainerWidth > oldContainerWidth) {
-        containerFrame.size.width = newContainerWidth;
-        buttonsContainer.frame = containerFrame;
-        
-        // 调整整个视图的宽度
-        CGRect selfFrame = self.frame;
-        CGFloat widthIncrease = newContainerWidth - oldContainerWidth;
-        selfFrame.size.width += widthIncrease;
-        self.frame = selfFrame;
+    // 计算间距（点赞和评论按钮之间的间距）
+    if (CGRectGetMaxX(likeButton.frame) < CGRectGetMinX(commentButton.frame)) {
+        spacing = CGRectGetMinX(commentButton.frame) - CGRectGetMaxX(likeButton.frame);
+    } else {
+        spacing = 5; // 默认间距
     }
+    
+    // 重新布局所有按钮
+    CGFloat totalWidth = buttonWidth * 3 + spacing * 2;
+    
+    // 调整容器和视图大小
+    CGRect clipFrame = clipView.frame;
+    clipFrame.size.width = totalWidth;
+    clipView.frame = clipFrame;
+    
+    CGRect selfFrame = self.frame;
+    selfFrame.size.width = totalWidth;
+    self.frame = selfFrame;
+    
+    // 重新设置按钮位置
+    likeButton.frame = CGRectMake(0, 0, buttonWidth, buttonHeight);
+    commentButton.frame = CGRectMake(buttonWidth + spacing, 0, buttonWidth, buttonHeight);
+    forwardButton.frame = CGRectMake((buttonWidth + spacing) * 2, 0, buttonWidth, buttonHeight);
+    
+    // 添加到视图
+    [clipView addSubview:forwardButton];
+    
+    // 重新定位整个视图使其居中显示
+    [self adjustPositionForTipPoint:arg2];
 }
 
 %new
 - (void)dd_forwardTimeline:(UIButton *)sender {
-    // 获取转发视图控制器并显示
-    WCForwardViewController *forwardVC = [[objc_getClass("WCForwardViewController") alloc] initWithDataItem:self.m_item];
     if (self.navigationController) {
-        [self.navigationController pushViewController:forwardVC animated:YES];
+        Class WCForwardViewControllerClass = objc_getClass("WCForwardViewController");
+        if (WCForwardViewControllerClass) {
+            WCForwardViewController *forwardVC = [[WCForwardViewControllerClass alloc] initWithDataItem:self.m_item];
+            [self.navigationController pushViewController:forwardVC animated:YES];
+        }
     }
+}
+
+%new
+- (void)adjustPositionForTipPoint:(CGPoint)tipPoint {
+    // 调整视图位置，使其相对于tipPoint居中
+    CGRect frame = self.frame;
+    frame.origin.x = tipPoint.x - frame.size.width / 2;
+    
+    // 确保不会超出屏幕边界
+    UIWindow *window = [UIApplication sharedApplication].keyWindow;
+    CGFloat screenWidth = CGRectGetWidth(window.bounds);
+    
+    if (frame.origin.x < 0) {
+        frame.origin.x = 10;
+    } else if (CGRectGetMaxX(frame) > screenWidth) {
+        frame.origin.x = screenWidth - frame.size.width - 10;
+    }
+    
+    self.frame = frame;
 }
 
 %end

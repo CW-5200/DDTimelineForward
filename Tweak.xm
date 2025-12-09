@@ -75,13 +75,11 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     // 配置iOS 15+模态样式
-    if (@available(iOS 15.0, *)) {
-        UISheetPresentationController *sheet = self.sheetPresentationController;
-        if (sheet) {
-            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
-            sheet.prefersGrabberVisible = YES;
-            sheet.preferredCornerRadius = 20.0;
-        }
+    UISheetPresentationController *sheet = self.sheetPresentationController;
+    if (sheet) {
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+        sheet.prefersGrabberVisible = YES;
+        sheet.preferredCornerRadius = 20.0;
     }
     
     [self setupUI];
@@ -140,7 +138,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     [NSLayoutConstraint activateConstraints:@[
         [mainStack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
         [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailing constant:-20]
+        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20]
     ]];
 }
 
@@ -164,31 +162,23 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         // 创建转发按钮
         MMUIButton *forwardButton = [MMUIButton buttonWithType:UIButtonTypeCustom];
         
-        // 设置按钮标题和样式
-        [forwardButton setTitle:@"转发" forState:UIControlStateNormal];
-        [forwardButton setTitleColor:[likeButton titleColorForState:UIControlStateNormal] forState:UIControlStateNormal];
-        [forwardButton setTitleColor:[likeButton titleColorForState:UIControlStateHighlighted] forState:UIControlStateHighlighted];
+        // 使用 UIButtonConfiguration（iOS 15+）
+        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+        config.title = @"转发";
+        config.image = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
+        config.imagePlacement = NSDirectionalRectEdgeLeading;
+        config.imagePadding = 5;
+        config.baseForegroundColor = [likeButton titleColorForState:UIControlStateNormal];
         
-        // 使用系统图标
-        if (@available(iOS 13.0, *)) {
-            UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
-            if (forwardIcon) {
-                forwardIcon = [forwardIcon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-                [forwardButton setImage:forwardIcon forState:UIControlStateNormal];
-            }
+        // 设置字体
+        UIFont *font = likeButton.titleLabel.font;
+        if (font) {
+            NSMutableAttributedString *attributedTitle = [[NSMutableAttributedString alloc] initWithString:@"转发"];
+            [attributedTitle addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributedTitle.length)];
+            config.attributedTitle = attributedTitle;
         }
         
-        // 设置字体和布局
-        forwardButton.titleLabel.font = likeButton.titleLabel.font;
-        forwardButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
-        
-        // 调整图标和文字的位置
-        forwardButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-        forwardButton.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
-        
-        // 设置图标和文字的间距
-        forwardButton.imageEdgeInsets = UIEdgeInsetsMake(0, -5, 0, 5);
-        forwardButton.titleEdgeInsets = UIEdgeInsetsMake(0, 5, 0, -5);
+        forwardButton.configuration = config;
         
         // 添加点击事件
         [forwardButton addTarget:self action:@selector(dd_forwardTimeline:) forControlEvents:UIControlEventTouchUpInside];

@@ -75,11 +75,13 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     // 配置iOS 15+模态样式
-    UISheetPresentationController *sheet = self.sheetPresentationController;
-    if (sheet) {
-        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
-        sheet.prefersGrabberVisible = YES;
-        sheet.preferredCornerRadius = 20.0;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheet = self.sheetPresentationController;
+        if (sheet) {
+            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+            sheet.prefersGrabberVisible = YES;
+            sheet.preferredCornerRadius = 20.0;
+        }
     }
     
     [self setupUI];
@@ -120,7 +122,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     // 说明文字
     UILabel *descriptionLabel = [[UILabel alloc] init];
     descriptionLabel.text = @"启用后在朋友圈菜单中添加「转发」按钮，可快速转发朋友圈内容";
-    descriptionLabel.font = [UFont systemFontOfSize:14];
+    descriptionLabel.font = [UIFont systemFontOfSize:14];
     descriptionLabel.textColor = [UIColor secondaryLabelColor];
     descriptionLabel.numberOfLines = 0;
     descriptionLabel.textAlignment = NSTextAlignmentCenter;
@@ -138,7 +140,7 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
     [NSLayoutConstraint activateConstraints:@[
         [mainStack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
         [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20]
+        [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailing constant:-20]
     ]];
 }
 
@@ -168,8 +170,8 @@ static NSString *const kTimelineForwardEnabledKey = @"DDTimelineForwardEnabled";
         [forwardButton setTitleColor:[likeButton titleColorForState:UIControlStateHighlighted] forState:UIControlStateHighlighted];
         
         // 使用系统图标
-        UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
         if (@available(iOS 13.0, *)) {
+            UIImage *forwardIcon = [UIImage systemImageNamed:@"arrowshape.turn.up.right.fill"];
             if (forwardIcon) {
                 forwardIcon = [forwardIcon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
                 [forwardButton setImage:forwardIcon forState:UIControlStateNormal];
